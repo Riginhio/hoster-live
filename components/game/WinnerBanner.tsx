@@ -10,7 +10,7 @@ export function WinnerBanner({ winner = "Mesa 12 - Los Compadres" }: WinnerBanne
           Ultimo ganador
         </p>
         <p className="font-display text-3xl text-bone md:text-4xl">{winner}</p>
-        <p className="text-sm font-semibold text-bone/70">Premio mock: ronda de mezcal</p>
+        <p className="text-sm font-semibold text-bone/70">Premio live confirmado</p>
       </div>
     </div>
   );

@@ -22,7 +22,7 @@ export const promoItems = [
   },
   {
     title: "Botella mezcal joven",
-    detail: "Precio de cantina hasta medianoche",
+    detail: "Precio hospitality hasta medianoche",
     tag: "Promo",
   },
 ];

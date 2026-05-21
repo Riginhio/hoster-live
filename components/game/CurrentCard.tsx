@@ -1,3 +1,5 @@
+import { BrandMark } from "@/components/brand/BrandMark";
+
 type CurrentCardProps = {
   name?: string;
   number?: string;
@@ -12,13 +14,14 @@ export function CurrentCard({ name = "El Gallo", number = "01" }: CurrentCardPro
       <div className="relative aspect-[3/4] w-full max-w-[360px] rounded-lg border-2 border-mezcal bg-bone p-3 shadow-glow md:max-w-[460px] xl:max-w-[540px]">
         <div className="flex h-full flex-col justify-between rounded-md border-2 border-obsidian/85 bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-obsidian">
           <div className="flex items-center justify-between text-sm font-black uppercase tracking-[0.22em]">
-            <span>Loteria</span>
+            <span>Hoster Live</span>
             <span>{number}</span>
           </div>
           <div className="grid flex-1 place-items-center">
-            <div className="rounded-lg border-4 border-obsidian px-8 py-6 font-display text-[5rem] leading-none md:text-[8rem] xl:text-[10rem]">
-              LC
-            </div>
+            <BrandMark
+              className="h-36 w-36 border-obsidian/65 shadow-none md:h-48 md:w-48 xl:h-56 xl:w-56"
+              textClassName="text-[4rem] leading-none md:text-[5.5rem] xl:text-[6.5rem]"
+            />
           </div>
           <h2 className="font-display text-5xl leading-none md:text-7xl xl:text-8xl">{name}</h2>
         </div>

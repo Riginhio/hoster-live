@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { BrandMark } from "@/components/brand/BrandMark";
 import {
   checkWinner,
   generateBoard,
@@ -94,14 +95,14 @@ function playTone(kind: "card" | "winner") {
       void context.close();
     }, kind === "winner" ? 900 : 300);
   } catch {
-    // Audio is a progressive enhancement for the local mock TV screen.
+    // Audio is a progressive enhancement for the local TV screen.
   }
 }
 
 export function GameScreen({ restaurantId }: GameScreenProps) {
   const boardsRef = useRef<LoteriaBoard[]>(
     Array.from({ length: 50 }, (_, index) =>
-      generateBoard(`LC-${String(index + 1).padStart(3, "0")}`),
+      generateBoard(`HL-${String(index + 1).padStart(3, "0")}`),
     ),
   );
   const [config, setConfig] = useState<DemoGameConfig>(() =>
@@ -280,11 +281,17 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
         <main className="order-1 flex min-w-0 flex-col gap-4 xl:order-2">
           <div className="flex flex-col gap-4 rounded-lg border border-bone/10 bg-charcoal/70 px-4 py-3 shadow-cantina backdrop-blur md:flex-row md:items-center md:justify-between">
-            <div>
+            <div className="flex items-center gap-3">
+              <BrandMark className="h-12 w-12" textClassName="text-base" />
+              <div>
               <p className="text-xs font-bold uppercase tracking-[0.28em] text-mezcal">
                 {restaurant.name}
               </p>
-              <h1 className="font-display text-3xl text-bone md:text-5xl">Loteria en vivo</h1>
+              <h1 className="font-display text-3xl text-bone md:text-5xl">HOSTER LIVE</h1>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.22em] text-bone/45">
+                Hospitality Gaming Platform
+              </p>
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-lg bg-agave/14 px-4 py-3">
@@ -376,13 +383,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             >
               <div className="flex h-full flex-col justify-between rounded-md border-2 border-obsidian/85 bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-obsidian">
                 <div className="flex items-center justify-between text-sm font-black uppercase tracking-[0.22em]">
-                  <span>Loteria</span>
+                  <span>Hoster Live</span>
                   <span>{currentCard ? String(currentCard.number).padStart(2, "0") : "Demo"}</span>
                 </div>
                 <div className="grid flex-1 place-items-center">
-                  <div className="rounded-lg border-4 border-obsidian px-8 py-6 font-display text-[5rem] leading-none md:text-[7rem]">
-                    LC
-                  </div>
+                  <BrandMark
+                    className="h-36 w-36 border-obsidian/65 shadow-none md:h-44 md:w-44"
+                    textClassName="text-[4rem] leading-none md:text-[5rem]"
+                  />
                 </div>
                 <h2 className="font-display text-5xl leading-none md:text-7xl">
                   {currentCard?.name ?? "Lista"}
@@ -461,7 +469,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
           <div className="mt-5 grid gap-3 text-sm">
             <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-3">
-              <p className="text-bone/45">Tablas mock generadas</p>
+              <p className="text-bone/45">Tablas live generadas</p>
               <p className="mt-1 text-2xl font-black text-bone">50</p>
             </div>
             <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-3">
@@ -496,6 +504,9 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           </div>
         </div>
       ) : null}
+      <p className="mt-4 text-center text-xs font-semibold uppercase tracking-[0.22em] text-bone/35">
+        Powered by Hoster Live
+      </p>
     </div>
   );
 }

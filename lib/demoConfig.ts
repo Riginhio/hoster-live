@@ -12,7 +12,7 @@ export type DemoGameConfig = {
 };
 
 export const configStorageKey = "loteria:demo-config";
-export const defaultRestaurantId = "cantina-la-nacional";
+export const defaultRestaurantId = "rancho-viejo";
 
 const modes: WinMode[] = ["four_corners", "x_shape", "center_four"];
 

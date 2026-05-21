@@ -4,7 +4,7 @@ export function PromoPanel() {
   return (
     <section className="rounded-lg border border-mezcal/20 bg-charcoal/80 p-4 shadow-cantina backdrop-blur">
       <div className="mb-4">
-        <p className="text-xs font-bold uppercase tracking-[0.24em] text-mezcal">Cantina</p>
+        <p className="text-xs font-bold uppercase tracking-[0.24em] text-mezcal">HOSTER LIVE</p>
         <h2 className="font-display text-2xl text-bone">Promociones</h2>
       </div>
       <div className="space-y-3">

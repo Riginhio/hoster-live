@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Loteria Cantina",
-  description: "Panel visual para jugadas de loteria en cantinas modernas.",
+  title: "HOSTER LIVE",
+  description: "Hospitality Gaming Platform para operacion premium en venues.",
 };
 
 export default function RootLayout({

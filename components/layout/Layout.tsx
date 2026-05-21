@@ -16,6 +16,9 @@ export function Layout({ children, title, eyebrow }: LayoutProps) {
         <Header title={title} eyebrow={eyebrow} />
         <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 lg:py-8">
           {children}
+          <footer className="mt-8 border-t border-bone/10 pt-4 text-xs font-semibold uppercase tracking-[0.22em] text-bone/35">
+            Powered by Hoster Live
+          </footer>
         </main>
       </div>
     </div>

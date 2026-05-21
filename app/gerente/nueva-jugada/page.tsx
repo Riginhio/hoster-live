@@ -84,7 +84,7 @@ export default function NuevaJugadaPage() {
     try {
       localStorage.setItem(configStorageKey, JSON.stringify(nextConfig));
     } catch {
-      // El mock puede seguir funcionando aunque el navegador bloquee almacenamiento.
+      // La experiencia local puede seguir funcionando aunque el navegador bloquee almacenamiento.
     }
 
     setConfig(nextConfig);
@@ -97,9 +97,9 @@ export default function NuevaJugadaPage() {
         <Card>
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
-              <h2 className="font-display text-3xl text-bone">Configuracion mock</h2>
+              <h2 className="font-display text-3xl text-bone">Configuracion live</h2>
               <p className="mt-2 max-w-2xl text-sm text-bone/60">
-                Esta configuracion se guarda solo en este navegador para probar el motor local.
+                Esta configuracion se guarda en este navegador para probar el motor local.
               </p>
             </div>
             <Link
@@ -215,7 +215,7 @@ export default function NuevaJugadaPage() {
               </Button>
               {savedConfig ? (
                 <p className="text-sm font-semibold text-agave">
-                  Jugada mock lista para {selectedRestaurant.name}.
+                  Jugada live lista para {selectedRestaurant.name}.
                 </p>
               ) : null}
             </div>
