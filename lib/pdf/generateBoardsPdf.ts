@@ -1,6 +1,9 @@
 import type { LoteriaBoard } from "@/lib/loteria";
 import type { Session } from "@/lib/sessions/sessionStorage";
 import type { BoardBatch } from "@/lib/boards/boardBatchStorage";
+import { createValidationUrl } from "@/lib/qr/qrPayload";
+import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
+import type { RestaurantConfig } from "@/lib/types";
 
 type GenerateBoardsPdfParams = {
   boards: LoteriaBoard[];
@@ -8,6 +11,7 @@ type GenerateBoardsPdfParams = {
   restaurantName: string;
   tablePrice: number;
   prizeAmount: number;
+  batch?: BoardBatch | null;
   validFrom?: string;
   validTo?: string;
 };
@@ -45,7 +49,7 @@ async function loadImageDataUrl(src: string) {
 
 type PdfDocument = InstanceType<(typeof import("jspdf"))["jsPDF"]>;
 
-function drawQrPlaceholder(pdf: PdfDocument, x: number, y: number, size: number) {
+function drawQrPlaceholder(pdf: PdfDocument, x: number, y: number, size: number, validateUrl?: string) {
   pdf.setDrawColor(217, 164, 65);
   pdf.setLineWidth(0.6);
   pdf.rect(x, y, size, size);
@@ -65,6 +69,43 @@ function drawQrPlaceholder(pdf: PdfDocument, x: number, y: number, size: number)
   pdf.setFontSize(7);
   pdf.setTextColor(217, 164, 65);
   pdf.text("QR", x + size / 2, y + size + 4, { align: "center" });
+
+  if (validateUrl) {
+    pdf.link(x, y, size, size, { url: validateUrl });
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(4.4);
+    pdf.setTextColor(80, 80, 80);
+    const shortUrl = validateUrl.replace(/^https?:\/\//, "");
+    pdf.text(shortUrl.slice(0, 34), x + size / 2, y + size + 8, { align: "center" });
+  }
+}
+
+async function drawQrCode(pdf: PdfDocument, x: number, y: number, size: number, validateUrl?: string) {
+  if (!validateUrl) {
+    drawQrPlaceholder(pdf, x, y, size);
+    return;
+  }
+
+  try {
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=1&data=${encodeURIComponent(
+      validateUrl,
+    )}`;
+    const qrImageDataUrl = await loadImageDataUrl(qrImageUrl);
+
+    pdf.setDrawColor(217, 164, 65);
+    pdf.setLineWidth(0.6);
+    pdf.rect(x, y, size, size);
+    pdf.addImage(qrImageDataUrl, "PNG", x + 1.2, y + 1.2, size - 2.4, size - 2.4);
+    pdf.link(x, y, size, size, { url: validateUrl });
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(4.4);
+    pdf.setTextColor(80, 80, 80);
+    pdf.text(validateUrl.replace(/^https?:\/\//, "").slice(0, 34), x + size / 2, y + size + 4, {
+      align: "center",
+    });
+  } catch {
+    drawQrPlaceholder(pdf, x, y, size, validateUrl);
+  }
 }
 
 function drawCover(pdf: PdfDocument, params: GenerateBoardsPdfParams) {
@@ -123,43 +164,87 @@ function drawCover(pdf: PdfDocument, params: GenerateBoardsPdfParams) {
   pdf.text("Powered by Hoster Live", pageWidth / 2, pageHeight - 24, { align: "center" });
 }
 
-function drawBoardFrame(pdf: PdfDocument, board: LoteriaBoard, params: GenerateBoardsPdfParams) {
+function getBoardValidationUrl(board: LoteriaBoard, params: GenerateBoardsPdfParams) {
+  const batchId = params.batch?.id ?? params.session?.batchId;
+  const restaurantId = params.batch?.restaurantId ?? params.session?.restaurantId;
+
+  if (!batchId || !restaurantId) {
+    return undefined;
+  }
+
+  return createValidationUrl(
+    {
+      restaurantId,
+      restaurantName: params.batch?.restaurantName ?? params.session?.restaurantName,
+      batchId,
+      batchName: params.batch?.name,
+      folio: board.folio,
+    },
+    typeof window !== "undefined" ? window.location.origin : "",
+  );
+}
+
+async function drawBoardFrame(
+  pdf: PdfDocument,
+  board: LoteriaBoard,
+  params: GenerateBoardsPdfParams,
+  validateUrl?: string,
+) {
+  const restaurant = getRestaurantById(params.batch?.restaurantId ?? params.session?.restaurantId ?? "");
   pdf.setFillColor(255, 252, 244);
   pdf.rect(0, 0, pageWidth, pageHeight, "F");
   pdf.setDrawColor(217, 164, 65);
   pdf.setLineWidth(1.2);
-  pdf.rect(margin, margin, pageWidth - margin * 2, pageHeight - margin * 2);
+  pdf.rect(10, 10, pageWidth - 20, pageHeight - 20);
 
   pdf.setTextColor(8, 7, 6);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(20);
-  pdf.text(board.folio, margin + 4, 24);
+  pdf.setFontSize(24);
+  pdf.text(board.folio, 16, 24);
 
-  pdf.setFontSize(10);
-  pdf.text("Hoster Live", pageWidth / 2, 20, { align: "center" });
+  if (restaurant?.logoUrl) {
+    try {
+      const logoDataUrl = await loadImageDataUrl(restaurant.logoUrl);
+      pdf.addImage(logoDataUrl, "PNG", 88, 12, 40, 18);
+    } catch {
+      pdf.setFontSize(14);
+      pdf.text(params.restaurantName, pageWidth / 2, 20, { align: "center" });
+    }
+  } else {
+    pdf.setFontSize(14);
+    pdf.text(params.restaurantName, pageWidth / 2, 20, { align: "center" });
+  }
+
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8);
-  pdf.text(params.restaurantName, pageWidth / 2, 26, { align: "center" });
+  pdf.text("HOSTER LIVE", pageWidth / 2, 30, { align: "center" });
 
-  drawQrPlaceholder(pdf, pageWidth - margin - 27, 17, 21);
-
-  const footerY = pageHeight - 45;
-  pdf.setFillColor(255, 252, 244);
-  pdf.setDrawColor(217, 164, 65);
-  pdf.setLineWidth(0.6);
-  pdf.rect(margin + 4, footerY, pageWidth - margin * 2 - 8, 27);
-  pdf.setDrawColor(20, 17, 15);
-  pdf.setLineWidth(0.3);
-  pdf.rect(margin + 8, footerY + 7, 38, 12);
-  pdf.rect(margin + 52, footerY + 7, 58, 12);
-  pdf.rect(margin + 116, footerY + 7, 28, 12);
-  pdf.rect(margin + 150, footerY + 7, 29, 12);
-  pdf.setFontSize(8);
+  await drawQrCode(pdf, pageWidth - 40, 12, 24, validateUrl);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(6.5);
   pdf.setTextColor(80, 80, 80);
-  pdf.text("Mesa", margin + 8, footerY + 5);
-  pdf.text("Nombre cliente", margin + 52, footerY + 5);
-  pdf.text("Folio", margin + 116, footerY + 5);
-  pdf.text("Firma / recibido", margin + 150, footerY + 5);
+  pdf.text("Escanea para promociones", pageWidth - 28, 42, { align: "center" });
+
+  drawRestaurantSocials(pdf, restaurant);
+}
+
+function drawRestaurantSocials(pdf: PdfDocument, restaurant?: RestaurantConfig) {
+  if (!restaurant) return;
+
+  const socials = [
+    restaurant.instagram ? `IG ${restaurant.instagram.replace(/^https?:\/\/(www\.)?/, "")}` : "",
+    restaurant.facebook ? `FB ${restaurant.facebook.replace(/^https?:\/\/(www\.)?/, "")}` : "",
+    restaurant.tiktok ? `TT ${restaurant.tiktok.replace(/^https?:\/\/(www\.)?/, "")}` : "",
+  ].filter(Boolean);
+
+  if (socials.length === 0) return;
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(6.5);
+  pdf.setTextColor(80, 80, 80);
+  pdf.text(socials.join("  |  ").slice(0, 95), pageWidth / 2, pageHeight - 14, {
+    align: "center",
+  });
 }
 
 export async function generateBoardsPdf(params: GenerateBoardsPdfParams) {
@@ -171,14 +256,15 @@ export async function generateBoardsPdf(params: GenerateBoardsPdfParams) {
 
   for (const board of params.boards) {
     pdf.addPage();
-    drawBoardFrame(pdf, board, params);
+    const validateUrl = getBoardValidationUrl(board, params);
+    await drawBoardFrame(pdf, board, params, validateUrl);
 
-    const cardWidth = 35;
-    const cardHeight = 55.5;
-    const gap = 2.4;
+    const cardWidth = 39;
+    const cardHeight = 61.9;
+    const gap = 2.2;
     const gridWidth = cardWidth * 4 + gap * 3;
     const gridX = (pageWidth - gridWidth) / 2;
-    const gridY = 36;
+    const gridY = 44;
 
     for (let row = 0; row < 4; row += 1) {
       for (let col = 0; col < 4; col += 1) {
@@ -222,13 +308,14 @@ export async function generateControlSheetPdf(params: {
 
   pdf.setTextColor(8, 7, 6);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(20);
-  pdf.text("HOSTER LIVE", margin + 4, 28);
-  pdf.setFontSize(13);
-  pdf.text("Hoja de control de jugada", margin + 4, 38);
+  pdf.setFontSize(16);
+  pdf.text("HOSTER LIVE", margin + 4, 22);
+  pdf.setFontSize(11);
+  pdf.text("Hoja de control de jugada", margin + 4, 30);
 
   const details = [
     ["Restaurante", params.batch.restaurantName],
+    ["Lote", params.batch.name],
     ["Fecha", formatDate()],
     ["Jugada no.", params.gameNumber ?? ""],
     ["Ruletera", params.ruletera ?? ""],
@@ -236,52 +323,66 @@ export async function generateControlSheetPdf(params: {
     ["Premio", params.prize ? formatCurrency(params.prize) : ""],
   ];
 
-  pdf.setFontSize(9);
-  let y = 52;
+  pdf.setFontSize(7.4);
+  let y = 40;
   details.forEach(([label, value], index) => {
-    const x = index % 2 === 0 ? margin + 4 : 112;
-    if (index > 0 && index % 2 === 0) y += 10;
+    const column = index % 3;
+    const x = margin + 4 + column * 62;
+    if (index > 0 && column === 0) y += 8;
     pdf.setFont("helvetica", "bold");
     pdf.text(label, x, y);
     pdf.setFont("helvetica", "normal");
-    pdf.text(value || "________________", x + 28, y);
+    pdf.text(String(value || "__________").slice(0, 28), x + 22, y);
   });
 
-  const tableX = margin + 4;
-  let tableY = 90;
-  const rowHeight = 7;
-  const colWidths = [24, 70, 22, 66];
-  const headers = ["Folio", "Nombre cliente", "Pago", "Observaciones"];
+  const columns = 2;
+  const rowsPerColumn = Math.ceil(quantity / columns);
+  const tableTop = 62;
+  const rowHeight = 7.2;
+  const columnWidth = 91;
+  const colWidths = [18, 43, 10, 20];
+  const headers = ["Folio", "Nombre / mesa", "Pago", "Obs."];
 
-  pdf.setFont("helvetica", "bold");
-  pdf.setFillColor(20, 17, 15);
-  pdf.setTextColor(244, 234, 215);
-  let x = tableX;
-  headers.forEach((header, index) => {
-    pdf.rect(x, tableY, colWidths[index], rowHeight, "F");
-    pdf.text(header, x + 2, tableY + 4.8);
-    x += colWidths[index];
-  });
+  pdf.setTextColor(8, 7, 6);
+  pdf.setFontSize(6.8);
+
+  for (let column = 0; column < columns; column += 1) {
+    const tableX = margin + 4 + column * (columnWidth + 4);
+    let tableY = tableTop;
+
+    pdf.setFont("helvetica", "bold");
+    pdf.setFillColor(20, 17, 15);
+    pdf.setTextColor(244, 234, 215);
+    let x = tableX;
+    headers.forEach((header, index) => {
+      pdf.rect(x, tableY, colWidths[index], rowHeight, "F");
+      pdf.text(header, x + 1.2, tableY + 4.7);
+      x += colWidths[index];
+    });
+
+    tableY += rowHeight;
+    pdf.setTextColor(8, 7, 6);
+    pdf.setFont("helvetica", "normal");
+
+    for (let row = 0; row < rowsPerColumn; row += 1) {
+      const index = column * rowsPerColumn + row;
+      if (index >= quantity) break;
+
+      const folio = `HL-${String(index + 1).padStart(3, "0")}`;
+      x = tableX;
+      [folio, "____________", "□", "____"].forEach((value, colIndex) => {
+        pdf.rect(x, tableY, colWidths[colIndex], rowHeight);
+        pdf.text(value, x + 1.2, tableY + 4.7);
+        x += colWidths[colIndex];
+      });
+      tableY += rowHeight;
+    }
+  }
 
   pdf.setFont("helvetica", "normal");
-  pdf.setTextColor(8, 7, 6);
-  tableY += rowHeight;
-
-  for (let index = 0; index < quantity; index += 1) {
-    if (tableY + rowHeight > pageHeight - margin - 4) {
-      pdf.addPage();
-      tableY = margin;
-    }
-
-    const folio = `HL-${String(index + 1).padStart(3, "0")}`;
-    x = tableX;
-    [folio, "", "", ""].forEach((value, colIndex) => {
-      pdf.rect(x, tableY, colWidths[colIndex], rowHeight);
-      if (value) pdf.text(value, x + 2, tableY + 4.8);
-      x += colWidths[colIndex];
-    });
-    tableY += rowHeight;
-  }
+  pdf.setFontSize(7);
+  pdf.setTextColor(80, 80, 80);
+  pdf.text("Hoster Live", pageWidth / 2, pageHeight - 12, { align: "center" });
 
   pdf.save(`hoster-live-control-${params.batch.restaurantName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`);
 }

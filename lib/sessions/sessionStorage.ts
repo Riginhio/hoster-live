@@ -1,6 +1,9 @@
 import { loteriaCards, type LoteriaCard, type WinMode } from "@/lib/loteria";
+import { calculateFinancialBreakdown } from "@/lib/finance";
+import type { QrCampaign } from "@/lib/types";
 
 export type SessionStatus = "active" | "finalized";
+export type AutoplayStatus = "idle" | "countdown" | "playing" | "paused" | "finished";
 
 export type Session = {
   id: string;
@@ -10,14 +13,28 @@ export type Session = {
   createdAt: string;
   startedAt: string;
   endedAt?: string;
+  lastUpdatedAt: string;
   mode: WinMode;
   activeTables: number;
   tablePrice: number;
   commissionPercent: number;
+  commissionHLPercent: number;
+  commissionRestaurantPercent: number;
+  commissionNetPercent: number;
+  commissionHLAmount: number;
+  commissionRestaurantAmount: number;
+  commissionNetAmount: number;
+  grossRevenue: number;
   prizeAmount: number;
   calledCards: string[];
   winnerFolio?: string;
   winnerCards: string[];
+  autoplayStatus: AutoplayStatus;
+  autoplayIntervalSeconds: number;
+  preStartCountdownSeconds: number;
+  preStartStartedAt?: string;
+  autoplayStartedAt?: string;
+  activePromotions?: QrCampaign[];
   status: SessionStatus;
   durationSeconds: number;
 };
@@ -100,10 +117,57 @@ export function getSessions(): Session[] {
 
   try {
     const parsedValue = JSON.parse(rawValue) as Session[];
-    return Array.isArray(parsedValue) ? parsedValue : [];
+    return Array.isArray(parsedValue) ? parsedValue.map(normalizeSession) : [];
   } catch {
     return [];
   }
+}
+
+function normalizeSession(session: Partial<Session>): Session {
+  const breakdown = calculateFinancialBreakdown({
+    activeTables: session.activeTables ?? 0,
+    tablePrice: session.tablePrice ?? 0,
+    commissionHLPercent: session.commissionHLPercent,
+    commissionRestaurantPercent: session.commissionRestaurantPercent,
+    commissionPercent: session.commissionPercent,
+  });
+
+  return {
+    id: session.id ?? createSessionId(),
+    batchId: session.batchId,
+    restaurantId: session.restaurantId ?? "rancho-viejo",
+    restaurantName: session.restaurantName ?? "Rancho Viejo",
+    createdAt: session.createdAt ?? new Date().toISOString(),
+    startedAt: session.startedAt ?? session.createdAt ?? new Date().toISOString(),
+    endedAt: session.endedAt,
+    lastUpdatedAt: session.lastUpdatedAt ?? session.createdAt ?? new Date().toISOString(),
+    mode: session.mode ?? "four_corners",
+    activeTables: session.activeTables ?? 0,
+    tablePrice: session.tablePrice ?? 0,
+    commissionPercent: session.commissionPercent ?? breakdown.commissionNetPercent,
+    commissionHLPercent: session.commissionHLPercent ?? breakdown.commissionHLPercent,
+    commissionRestaurantPercent:
+      session.commissionRestaurantPercent ?? breakdown.commissionRestaurantPercent,
+    commissionNetPercent: session.commissionNetPercent ?? breakdown.commissionNetPercent,
+    commissionHLAmount: session.commissionHLAmount ?? breakdown.commissionHLAmount,
+    commissionRestaurantAmount:
+      session.commissionRestaurantAmount ?? breakdown.commissionRestaurantAmount,
+    commissionNetAmount: session.commissionNetAmount ?? breakdown.commissionNetAmount,
+    grossRevenue: session.grossRevenue ?? breakdown.grossRevenue,
+    prizeAmount: session.prizeAmount ?? breakdown.prizeAmount,
+    calledCards: session.calledCards ?? [],
+    winnerFolio: session.winnerFolio,
+    winnerCards: session.winnerCards ?? [],
+    autoplayStatus:
+      session.autoplayStatus ?? (session.status === "finalized" ? "finished" : "idle"),
+    autoplayIntervalSeconds: session.autoplayIntervalSeconds ?? 5,
+    preStartCountdownSeconds: session.preStartCountdownSeconds ?? 60,
+    preStartStartedAt: session.preStartStartedAt,
+    autoplayStartedAt: session.autoplayStartedAt,
+    activePromotions: session.activePromotions ?? [],
+    status: session.status ?? "active",
+    durationSeconds: session.durationSeconds ?? 0,
+  };
 }
 
 function saveSessions(sessions: Session[]) {
@@ -113,6 +177,17 @@ function saveSessions(sessions: Session[]) {
 
   window.localStorage.setItem(sessionsStorageKey, JSON.stringify(sessions));
   return sessions;
+}
+
+function finalizeSession(session: Session, endedAt: string): Session {
+  return normalizeSession({
+    ...session,
+    endedAt,
+    status: "finalized",
+    autoplayStatus: "finished",
+    lastUpdatedAt: endedAt,
+    durationSeconds: calculateDurationSeconds(session.startedAt, endedAt),
+  });
 }
 
 export function getSessionById(sessionId: string) {
@@ -128,8 +203,22 @@ export function createSession(
     | "startedAt"
     | "endedAt"
     | "calledCards"
+    | "lastUpdatedAt"
+    | "commissionHLPercent"
+    | "commissionRestaurantPercent"
+    | "commissionNetPercent"
+    | "commissionHLAmount"
+    | "commissionRestaurantAmount"
+    | "commissionNetAmount"
+    | "grossRevenue"
     | "winnerFolio"
     | "winnerCards"
+    | "autoplayStatus"
+    | "autoplayIntervalSeconds"
+    | "preStartCountdownSeconds"
+    | "preStartStartedAt"
+    | "autoplayStartedAt"
+    | "activePromotions"
     | "status"
     | "durationSeconds"
   > &
@@ -141,14 +230,35 @@ export function createSession(
         | "startedAt"
         | "batchId"
         | "calledCards"
+        | "lastUpdatedAt"
+        | "commissionHLPercent"
+        | "commissionRestaurantPercent"
+        | "commissionNetPercent"
+        | "commissionHLAmount"
+        | "commissionRestaurantAmount"
+        | "commissionNetAmount"
+        | "grossRevenue"
         | "winnerFolio"
         | "winnerCards"
+        | "autoplayStatus"
+        | "autoplayIntervalSeconds"
+        | "preStartCountdownSeconds"
+        | "preStartStartedAt"
+        | "autoplayStartedAt"
+        | "activePromotions"
         | "status"
         | "durationSeconds"
       >
     >,
 ) {
   const now = new Date().toISOString();
+  const breakdown = calculateFinancialBreakdown({
+    activeTables: session.activeTables,
+    tablePrice: session.tablePrice,
+    commissionHLPercent: session.commissionHLPercent,
+    commissionRestaurantPercent: session.commissionRestaurantPercent,
+    commissionPercent: session.commissionPercent,
+  });
   const createdSession: Session = {
     id: session.id ?? createSessionId(),
     batchId: session.batchId,
@@ -156,26 +266,50 @@ export function createSession(
     restaurantName: session.restaurantName,
     createdAt: session.createdAt ?? now,
     startedAt: session.startedAt ?? now,
+    lastUpdatedAt: session.lastUpdatedAt ?? now,
     mode: session.mode,
     activeTables: session.activeTables,
     tablePrice: session.tablePrice,
-    commissionPercent: session.commissionPercent,
-    prizeAmount: session.prizeAmount,
-    calledCards: session.calledCards ?? [],
-    winnerFolio: session.winnerFolio,
-    winnerCards: session.winnerCards ?? [],
-    status: session.status ?? "active",
+    commissionPercent: session.commissionPercent ?? breakdown.commissionNetPercent,
+    commissionHLPercent: session.commissionHLPercent ?? breakdown.commissionHLPercent,
+    commissionRestaurantPercent:
+      session.commissionRestaurantPercent ?? breakdown.commissionRestaurantPercent,
+    commissionNetPercent: session.commissionNetPercent ?? breakdown.commissionNetPercent,
+    commissionHLAmount: session.commissionHLAmount ?? breakdown.commissionHLAmount,
+    commissionRestaurantAmount:
+      session.commissionRestaurantAmount ?? breakdown.commissionRestaurantAmount,
+    commissionNetAmount: session.commissionNetAmount ?? breakdown.commissionNetAmount,
+    grossRevenue: session.grossRevenue ?? breakdown.grossRevenue,
+    prizeAmount: session.prizeAmount ?? breakdown.prizeAmount,
+    calledCards: [],
+    winnerFolio: undefined,
+    winnerCards: [],
+    autoplayStatus: "idle",
+    autoplayIntervalSeconds: session.autoplayIntervalSeconds ?? 5,
+    preStartCountdownSeconds: session.preStartCountdownSeconds ?? 60,
+    preStartStartedAt: session.preStartStartedAt,
+    autoplayStartedAt: session.autoplayStartedAt,
+    activePromotions: session.activePromotions ?? [],
+    status: "active",
     durationSeconds: session.durationSeconds ?? 0,
   };
+  const finalizedCurrentSessions = getSessions().map((currentSession) =>
+    currentSession.restaurantId === createdSession.restaurantId &&
+    currentSession.status === "active"
+      ? finalizeSession(currentSession, now)
+      : currentSession,
+  );
 
-  saveSessions([createdSession, ...getSessions()]);
+  saveSessions([createdSession, ...finalizedCurrentSessions]);
   return createdSession;
 }
 
 export function updateSession(sessionId: string, updates: Partial<Omit<Session, "id">>) {
   const sessions = getSessions();
   const updatedSessions = sessions.map((session) =>
-    session.id === sessionId ? { ...session, ...updates } : session,
+    session.id === sessionId
+      ? normalizeSession({ ...session, ...updates, lastUpdatedAt: new Date().toISOString() })
+      : session,
   );
 
   saveSessions(updatedSessions);
@@ -195,13 +329,23 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
     ...updates,
     endedAt,
     status: "finalized",
+    autoplayStatus: "finished",
     durationSeconds: calculateDurationSeconds(session.startedAt, endedAt),
   });
 }
 
-export function getActiveSession(restaurantId?: string) {
+export function getActiveSessionByRestaurantId(restaurantId: string) {
   return getSessions().find(
-    (session) =>
-      session.status === "active" && (!restaurantId || session.restaurantId === restaurantId),
+    (session) => session.restaurantId === restaurantId && session.status === "active",
+  );
+}
+
+export function getActiveSession(restaurantId?: string) {
+  if (restaurantId) {
+    return getActiveSessionByRestaurantId(restaurantId);
+  }
+
+  return getSessions().find(
+    (session) => session.status === "active",
   );
 }

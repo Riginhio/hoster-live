@@ -5,7 +5,8 @@ import { Archive, CheckCircle2, Download, FileText, Plus } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { restaurants } from "@/lib/restaurants";
+import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
+import type { RestaurantConfig } from "@/lib/types";
 import {
   activateBoardBatch,
   archiveBoardBatch,
@@ -40,6 +41,7 @@ function statusClassName(status: BoardBatch["status"]) {
 
 export default function MasterLotesPage() {
   const [batches, setBatches] = useState<BoardBatch[]>([]);
+  const [restaurants, setRestaurants] = useState<RestaurantConfig[]>(() => getRestaurants());
   const [restaurantId, setRestaurantId] = useState(restaurants[0]?.id ?? "");
   const [name, setName] = useState("Lote operativo");
   const [quantity, setQuantity] = useState(50);
@@ -48,7 +50,14 @@ export default function MasterLotesPage() {
   const [error, setError] = useState<string | null>(null);
   const selectedRestaurant = useMemo(
     () => restaurants.find((restaurant) => restaurant.id === restaurantId) ?? restaurants[0],
-    [restaurantId],
+    [restaurantId, restaurants],
+  );
+  const allowedQuantities = useMemo(
+    () =>
+      selectedRestaurant?.allowedTableCounts?.length
+        ? selectedRestaurant.allowedTableCounts
+        : [20, 30, 50],
+    [selectedRestaurant],
   );
 
   function refreshBatches() {
@@ -56,8 +65,17 @@ export default function MasterLotesPage() {
   }
 
   useEffect(() => {
+    const loadedRestaurants = getRestaurants();
+    setRestaurants(loadedRestaurants);
+    setRestaurantId((currentId) => currentId || loadedRestaurants[0]?.id || "");
     refreshBatches();
   }, []);
+
+  useEffect(() => {
+    if (!allowedQuantities.includes(quantity)) {
+      setQuantity(allowedQuantities[0] ?? 20);
+    }
+  }, [allowedQuantities, quantity]);
 
   function handleCreateBatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,6 +105,7 @@ export default function MasterLotesPage() {
       restaurantName: batch.restaurantName,
       tablePrice: 0,
       prizeAmount: 0,
+      batch,
       validFrom: batch.validFrom,
       validTo: batch.validTo,
     });
@@ -140,7 +159,7 @@ export default function MasterLotesPage() {
               onChange={(event) => setQuantity(Number(event.target.value))}
               className={inputClassName}
             >
-              {[20, 30, 50].map((option) => (
+              {allowedQuantities.map((option) => (
                 <option key={option} value={option}>
                   {option} tablas
                 </option>

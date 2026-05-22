@@ -31,6 +31,16 @@ a {
   text-decoration: none;
 }
 
+select {
+  color: #f4ead7;
+  background-color: rgba(20, 17, 15, 0.96);
+}
+
+select option {
+  color: #f4ead7;
+  background-color: #14110f;
+}
+
 .cantina-grid {
   background-image:
     linear-gradient(rgba(244, 234, 215, 0.035) 1px, transparent 1px),

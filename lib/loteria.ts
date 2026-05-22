@@ -13,7 +13,7 @@ export type LoteriaBoard = {
   cards: LoteriaCard[][];
 };
 
-export type WinMode = "four_corners" | "x_shape" | "center_four";
+export type WinMode = "four_corners" | "x_shape" | "center_four" | "full_card";
 
 export type WinningPosition = {
   row: number;
@@ -58,6 +58,9 @@ const winPatterns: Record<WinMode, WinningPosition[]> = {
     { row: 2, col: 1 },
     { row: 2, col: 2 },
   ],
+  full_card: Array.from({ length: 4 }, (_, row) =>
+    Array.from({ length: 4 }, (__, col) => ({ row, col })),
+  ).flat(),
 };
 
 export function shuffleCards(cards: LoteriaCard[] = loteriaCards) {

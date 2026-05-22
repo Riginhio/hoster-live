@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { BoardCard } from "@/components/game/BoardCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
-  getActiveSession,
+  getActiveSessionByRestaurantId,
   getSessions,
   type Session,
 } from "@/lib/sessions/sessionStorage";
@@ -31,6 +31,10 @@ function modeLabel(mode: WinMode) {
     return "Figura X";
   }
 
+  if (mode === "full_card") {
+    return "Llena";
+  }
+
   return "Centro 4";
 }
 
@@ -44,7 +48,7 @@ export default function GerenteTablasPage() {
     function syncTablesState() {
       const restaurantId = currentUser?.restaurantId;
       const batch = restaurantId ? getActiveBoardBatch(restaurantId) : undefined;
-      const activeSession = getActiveSession(restaurantId);
+      const activeSession = restaurantId ? getActiveSessionByRestaurantId(restaurantId) : undefined;
       const latestSession = getSessions().find((item) =>
         restaurantId ? item.restaurantId === restaurantId : true,
       );
@@ -101,6 +105,7 @@ export default function GerenteTablasPage() {
         restaurantName,
         tablePrice,
         prizeAmount,
+        batch: activeBatch,
       });
     } finally {
       setIsExporting(false);
@@ -171,7 +176,7 @@ export default function GerenteTablasPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {boards.map((board) => (
           <BoardCard
-            key={board.folio}
+            key={`${session?.id ?? "sin-sesion"}-${board.folio}`}
             board={board}
             calledCardIds={calledCardIds}
             lastCalledCardId={lastCalledCardId}

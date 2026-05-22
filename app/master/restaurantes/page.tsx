@@ -13,10 +13,12 @@ import {
   getRestaurants,
   toggleRestaurant,
   updateRestaurant,
-} from "@/lib/storage/restaurants";
+} from "@/lib/restaurants/restaurantStorage";
 
 type RestaurantFormState = {
   name: string;
+  slug: string;
+  logoUrl: string;
   businessType: BusinessType;
   managerName: string;
   managerWhatsapp: string;
@@ -33,7 +35,31 @@ type RestaurantFormState = {
   estimatedGamesPerWeek: string;
   audienceType: string;
   notes: string;
-  commissionPercent: string;
+  commissionHLPercent: string;
+  commissionRestaurantPercent: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  autoplayDefault: boolean;
+  autoplayInterval: string;
+  showClock: boolean;
+  showSponsors: boolean;
+  showPromotions: boolean;
+  showQRPromo: boolean;
+  promoTitle: string;
+  promoSubtitle: string;
+  promoImageUrl: string;
+  standbyTitle: string;
+  standbySubtitle: string;
+  standbyImageUrl: string;
+  standbyPromoText: string;
+  standbyCtaText: string;
+  standbyCtaQrUrl: string;
+  standbyRotatePromotions: boolean;
+  instagram: string;
+  facebook: string;
+  tiktok: string;
+  qrCampaignId: string;
   allowedPrices: number[];
   allowedModes: WinMode[];
   allowedTableCounts: number[];
@@ -58,6 +84,7 @@ const modeOptions: Array<{ value: WinMode; label: string }> = [
   { value: "four_corners", label: "4 esquinas" },
   { value: "x_shape", label: "Figura X" },
   { value: "center_four", label: "Centro 4" },
+  { value: "full_card", label: "Llena" },
 ];
 
 const inputClassName =
@@ -67,6 +94,8 @@ const textareaClassName =
 
 const emptyForm: RestaurantFormState = {
   name: "",
+  slug: "",
+  logoUrl: "",
   businessType: "restaurante_bar",
   managerName: "",
   managerWhatsapp: "",
@@ -83,7 +112,31 @@ const emptyForm: RestaurantFormState = {
   estimatedGamesPerWeek: "4",
   audienceType: "",
   notes: "",
-  commissionPercent: "20",
+  commissionHLPercent: "0",
+  commissionRestaurantPercent: "20",
+  primaryColor: "#d9a441",
+  secondaryColor: "#1fa187",
+  accentColor: "#c0392b",
+  autoplayDefault: true,
+  autoplayInterval: "5000",
+  showClock: true,
+  showSponsors: true,
+  showPromotions: true,
+  showQRPromo: true,
+  promoTitle: "",
+  promoSubtitle: "",
+  promoImageUrl: "",
+  standbyTitle: "",
+  standbySubtitle: "",
+  standbyImageUrl: "",
+  standbyPromoText: "",
+  standbyCtaText: "",
+  standbyCtaQrUrl: "",
+  standbyRotatePromotions: true,
+  instagram: "",
+  facebook: "",
+  tiktok: "",
+  qrCampaignId: "",
   allowedPrices: [50, 100, 150, 200, 300],
   allowedModes: ["four_corners"],
   allowedTableCounts: [20, 30, 50],
@@ -127,6 +180,8 @@ function toggleModeValue(values: WinMode[], value: WinMode) {
 function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
   return {
     name: restaurant.name,
+    slug: restaurant.slug,
+    logoUrl: restaurant.logoUrl,
     businessType: restaurant.businessType,
     managerName: restaurant.managerName,
     managerWhatsapp: restaurant.managerWhatsapp,
@@ -143,7 +198,31 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     estimatedGamesPerWeek: String(restaurant.estimatedGamesPerWeek),
     audienceType: restaurant.audienceType,
     notes: restaurant.notes,
-    commissionPercent: String(restaurant.commissionPercent),
+    commissionHLPercent: String(restaurant.commissionHLPercent),
+    commissionRestaurantPercent: String(restaurant.commissionRestaurantPercent),
+    primaryColor: restaurant.primaryColor,
+    secondaryColor: restaurant.secondaryColor,
+    accentColor: restaurant.accentColor,
+    autoplayDefault: restaurant.autoplayDefault,
+    autoplayInterval: String(restaurant.autoplayInterval),
+    showClock: restaurant.showClock,
+    showSponsors: restaurant.showSponsors,
+    showPromotions: restaurant.showPromotions,
+    showQRPromo: restaurant.showQRPromo,
+    promoTitle: restaurant.promoTitle,
+    promoSubtitle: restaurant.promoSubtitle,
+    promoImageUrl: restaurant.promoImageUrl,
+    standbyTitle: restaurant.standbyTitle,
+    standbySubtitle: restaurant.standbySubtitle,
+    standbyImageUrl: restaurant.standbyImageUrl,
+    standbyPromoText: restaurant.standbyPromoText,
+    standbyCtaText: restaurant.standbyCtaText,
+    standbyCtaQrUrl: restaurant.standbyCtaQrUrl,
+    standbyRotatePromotions: restaurant.standbyRotatePromotions,
+    instagram: restaurant.instagram,
+    facebook: restaurant.facebook,
+    tiktok: restaurant.tiktok,
+    qrCampaignId: restaurant.qrCampaignId,
     allowedPrices: restaurant.allowedPrices,
     allowedModes: restaurant.allowedModes,
     allowedTableCounts: restaurant.allowedTableCounts,
@@ -152,7 +231,9 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
 }
 
 function validateForm(formState: RestaurantFormState) {
-  const commissionPercent = Number(formState.commissionPercent);
+  const commissionHLPercent = Number(formState.commissionHLPercent);
+  const commissionRestaurantPercent = Number(formState.commissionRestaurantPercent);
+  const commissionNetPercent = commissionHLPercent + commissionRestaurantPercent;
   const averageHostesses = Number(formState.averageHostesses);
   const estimatedGamesPerWeek = Number(formState.estimatedGamesPerWeek);
 
@@ -160,8 +241,16 @@ function validateForm(formState: RestaurantFormState) {
     return "El nombre del restaurante es obligatorio.";
   }
 
-  if (!Number.isFinite(commissionPercent) || commissionPercent < 15 || commissionPercent > 50) {
-    return "La comision debe estar entre 15% y 50%.";
+  if (!Number.isFinite(commissionHLPercent) || commissionHLPercent < 0) {
+    return "La comision HOSTER LIVE no puede ser menor a 0%.";
+  }
+
+  if (!Number.isFinite(commissionRestaurantPercent) || commissionRestaurantPercent < 0) {
+    return "La comision del restaurante no puede ser menor a 0%.";
+  }
+
+  if (commissionNetPercent > 100) {
+    return "La comision neta no puede ser mayor a 100%.";
   }
 
   if (formState.allowedPrices.length === 0) {
@@ -274,7 +363,7 @@ export default function RestaurantesPage() {
     }
 
     const totalCommission = restaurants.reduce(
-      (total, restaurant) => total + restaurant.commissionPercent,
+      (total, restaurant) => total + restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent,
       0,
     );
 
@@ -317,6 +406,10 @@ export default function RestaurantesPage() {
 
     const payload = {
       name: formState.name.trim(),
+      slug:
+        formState.slug.trim() ||
+        formState.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      logoUrl: formState.logoUrl.trim(),
       businessType: formState.businessType,
       managerName: formState.managerName.trim(),
       managerWhatsapp: formState.managerWhatsapp.trim(),
@@ -333,11 +426,41 @@ export default function RestaurantesPage() {
       estimatedGamesPerWeek: Number(formState.estimatedGamesPerWeek),
       audienceType: formState.audienceType.trim(),
       notes: formState.notes.trim(),
-      commissionPercent: Number(formState.commissionPercent),
+      commissionHLPercent: Number(formState.commissionHLPercent),
+      commissionRestaurantPercent: Number(formState.commissionRestaurantPercent),
+      commissionPercent:
+        Number(formState.commissionHLPercent) + Number(formState.commissionRestaurantPercent),
+      primaryColor: formState.primaryColor,
+      secondaryColor: formState.secondaryColor,
+      accentColor: formState.accentColor,
+      autoplayDefault: formState.autoplayDefault,
+      autoplayInterval: Number(formState.autoplayInterval),
+      showClock: formState.showClock,
+      showSponsors: formState.showSponsors,
+      showPromotions: formState.showPromotions,
+      showQRPromo: formState.showQRPromo,
+      promoTitle: formState.promoTitle.trim(),
+      promoSubtitle: formState.promoSubtitle.trim(),
+      promoImageUrl: formState.promoImageUrl.trim(),
+      standbyTitle: formState.standbyTitle.trim(),
+      standbySubtitle: formState.standbySubtitle.trim(),
+      standbyImageUrl: formState.standbyImageUrl.trim(),
+      standbyPromoText: formState.standbyPromoText.trim(),
+      standbyCtaText: formState.standbyCtaText.trim(),
+      standbyCtaQrUrl: formState.standbyCtaQrUrl.trim(),
+      standbyRotatePromotions: formState.standbyRotatePromotions,
+      instagram: formState.instagram.trim(),
+      facebook: formState.facebook.trim(),
+      tiktok: formState.tiktok.trim(),
+      qrCampaignId: formState.qrCampaignId.trim(),
       allowedPrices: formState.allowedPrices,
       allowedModes: formState.allowedModes,
       allowedTableCounts: formState.allowedTableCounts,
       enabledGames: formState.enabledGames,
+      theme: {
+        primaryColor: formState.primaryColor,
+        secondaryColor: formState.secondaryColor,
+      },
     };
 
     if (editingRestaurant) {
@@ -513,7 +636,9 @@ export default function RestaurantesPage() {
                       {restaurant.active ? "Activo" : "Inactivo"}
                     </span>
                   </td>
-                  <td className="px-5 py-5 text-bone">{restaurant.commissionPercent}%</td>
+                  <td className="px-5 py-5 text-bone">
+                    {restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent}%
+                  </td>
                   <td className="px-5 py-5">
                     <div className="flex flex-wrap gap-2">
                       {restaurant.enabledGames.map((game) => (
@@ -592,7 +717,10 @@ export default function RestaurantesPage() {
               <div className="mt-4 grid gap-2 text-sm text-bone/65">
                 <p>Gerente: {restaurant.managerName || "Sin asignar"}</p>
                 <p>WhatsApp: {restaurant.managerWhatsapp || "Sin captura"}</p>
-                <p>Comision: {restaurant.commissionPercent}%</p>
+                <p>
+                  Comision neta:{" "}
+                  {restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent}%
+                </p>
                 <p>Juegos: {restaurant.enabledGames.map(getGameLabel).join(", ")}</p>
               </div>
               <div className="mt-4 flex gap-2">
@@ -654,6 +782,32 @@ export default function RestaurantesPage() {
                     }
                     className={inputClassName}
                     placeholder="Rancho Viejo"
+                  />
+                </Field>
+                <Field label="Slug">
+                  <input
+                    value={formState.slug}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        slug: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                    placeholder="rancho-viejo"
+                  />
+                </Field>
+                <Field label="Logo URL" className="md:col-span-2">
+                  <input
+                    value={formState.logoUrl}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        logoUrl: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                    placeholder="https://..."
                   />
                 </Field>
                 <Field label="Giro">
@@ -876,19 +1030,285 @@ export default function RestaurantesPage() {
                 </Field>
               </FormSection>
 
-              <FormSection title="Configuracion de juego">
-                <Field label="Comision %">
+              <FormSection title="Branding y TV">
+                <Field label="Color primario">
                   <input
-                    type="number"
-                    min={15}
-                    max={50}
-                    value={formState.commissionPercent}
+                    type="color"
+                    value={formState.primaryColor}
                     onChange={(event) =>
                       setFormState((currentState) => ({
                         ...currentState,
-                        commissionPercent: event.target.value,
+                        primaryColor: event.target.value,
                       }))
                     }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Color secundario">
+                  <input
+                    type="color"
+                    value={formState.secondaryColor}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        secondaryColor: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Color acento">
+                  <input
+                    type="color"
+                    value={formState.accentColor}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        accentColor: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Intervalo autoplay ms">
+                  <input
+                    type="number"
+                    min={3000}
+                    step={1000}
+                    value={formState.autoplayInterval}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        autoplayInterval: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <div className="grid gap-2 md:col-span-2 sm:grid-cols-2">
+                  {[
+                    ["autoplayDefault", "Autoplay por default"],
+                    ["showClock", "Mostrar reloj"],
+                    ["showSponsors", "Mostrar sponsors"],
+                    ["showPromotions", "Mostrar promociones"],
+                    ["showQRPromo", "Mostrar promo QR"],
+                  ].map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="flex items-center justify-between rounded-lg border border-bone/10 bg-bone/[0.035] px-3 py-2 text-sm font-semibold text-bone/72"
+                    >
+                      {label}
+                      <input
+                        type="checkbox"
+                        checked={Boolean(formState[key as keyof RestaurantFormState])}
+                        onChange={(event) =>
+                          setFormState((currentState) => ({
+                            ...currentState,
+                            [key]: event.target.checked,
+                          }))
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+              </FormSection>
+
+              <FormSection title="Promociones y QR">
+                <Field label="Titulo promo">
+                  <input
+                    value={formState.promoTitle}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        promoTitle: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Imagen promo URL">
+                  <input
+                    value={formState.promoImageUrl}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        promoImageUrl: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Subtitulo promo" className="md:col-span-2">
+                  <textarea
+                    value={formState.promoSubtitle}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        promoSubtitle: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+                <Field label="QR campaign ID">
+                  <input
+                    value={formState.qrCampaignId}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        qrCampaignId: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Instagram">
+                  <input
+                    value={formState.instagram}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        instagram: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+              </FormSection>
+
+              <FormSection title="Pantalla Standby TV">
+                <Field label="Titulo standby">
+                  <input
+                    value={formState.standbyTitle}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbyTitle: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                    placeholder="HOSTER LIVE"
+                  />
+                </Field>
+                <Field label="Imagen/banner URL">
+                  <input
+                    value={formState.standbyImageUrl}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbyImageUrl: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Subtitulo standby" className="md:col-span-2">
+                  <textarea
+                    value={formState.standbySubtitle}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbySubtitle: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                    placeholder="La proxima jugada esta por comenzar"
+                  />
+                </Field>
+                <Field label="Texto promo" className="md:col-span-2">
+                  <textarea
+                    value={formState.standbyPromoText}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbyPromoText: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                    placeholder="Compra tus tablas con tu hostess"
+                  />
+                </Field>
+                <Field label="CTA">
+                  <input
+                    value={formState.standbyCtaText}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbyCtaText: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                    placeholder="Pide tu tabla ahora"
+                  />
+                </Field>
+                <Field label="URL QR/CTA">
+                  <input
+                    value={formState.standbyCtaQrUrl}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbyCtaQrUrl: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <label className="flex items-center justify-between rounded-lg border border-bone/10 bg-bone/[0.035] px-3 py-2 text-sm font-semibold text-bone/72 md:col-span-2">
+                  Rotar promociones QR/globales
+                  <input
+                    type="checkbox"
+                    checked={formState.standbyRotatePromotions}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        standbyRotatePromotions: event.target.checked,
+                      }))
+                    }
+                  />
+                </label>
+              </FormSection>
+
+              <FormSection title="Configuracion de juego">
+                <Field label="Comision HOSTER LIVE %">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={formState.commissionHLPercent}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        commissionHLPercent: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Comision Restaurante %">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={formState.commissionRestaurantPercent}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        commissionRestaurantPercent: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Comision neta %">
+                  <input
+                    type="number"
+                    value={
+                      Number(formState.commissionHLPercent || 0) +
+                      Number(formState.commissionRestaurantPercent || 0)
+                    }
+                    readOnly
                     className={inputClassName}
                   />
                 </Field>

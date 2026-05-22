@@ -3,6 +3,7 @@ import {
   type LoteriaBoard,
   type LoteriaCard,
 } from "@/lib/loteria";
+import { encodeBoardValidationPayload } from "@/lib/qr/qrPayload";
 
 export type BoardBatchStatus = "active" | "inactive" | "archived";
 
@@ -77,7 +78,7 @@ function createBoardsForBatch(batchId: string, restaurantId: string, quantity: n
       restaurantId,
       folio,
       cards: createBoardCards(index + 1401),
-      qrPayload: JSON.stringify({
+      qrPayload: encodeBoardValidationPayload({
         batchId,
         restaurantId,
         folio,

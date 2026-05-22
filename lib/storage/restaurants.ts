@@ -4,8 +4,11 @@ export const restaurantsStorageKey = "loteria:restaurants";
 
 export const demoRestaurant: RestaurantConfig = {
   id: "rancho-viejo",
+  slug: "rancho-viejo",
   name: "Rancho Viejo",
+  logoUrl: "",
   active: true,
+  isActive: true,
   businessType: "restaurante_bar",
   managerName: "Carolina Mendez",
   managerWhatsapp: "8112345678",
@@ -23,10 +26,35 @@ export const demoRestaurant: RestaurantConfig = {
   audienceType: "Adultos 28-45, grupos despues de oficina y celebraciones.",
   notes: "Cuenta con buena respuesta en noches de musica regional y promociones por mesa.",
   commissionPercent: 20,
+  commissionHLPercent: 0,
+  commissionRestaurantPercent: 20,
   allowedTableCounts: [20, 30, 50],
   allowedPrices: [50, 100, 150, 200, 300],
-  allowedModes: ["four_corners", "x_shape", "center_four"],
+  allowedModes: ["four_corners", "x_shape", "center_four", "full_card"],
   enabledGames: ["loteria"],
+  primaryColor: "#d9a441",
+  secondaryColor: "#1fa187",
+  accentColor: "#c0392b",
+  autoplayDefault: true,
+  autoplayInterval: 5000,
+  showClock: true,
+  showSponsors: true,
+  showPromotions: true,
+  showQRPromo: true,
+  promoTitle: "Noche de Loteria Live",
+  promoSubtitle: "Conserva tu tabla y participa hasta el cierre de la jugada.",
+  promoImageUrl: "",
+  standbyTitle: "HOSTER LIVE",
+  standbySubtitle: "La proxima jugada esta por comenzar",
+  standbyImageUrl: "",
+  standbyPromoText: "Compra tus tablas con tu hostess",
+  standbyCtaText: "Pide tu tabla ahora",
+  standbyCtaQrUrl: "",
+  standbyRotatePromotions: true,
+  instagram: "https://instagram.com/ranchoviejo",
+  facebook: "https://facebook.com/ranchoviejo",
+  tiktok: "",
+  qrCampaignId: "",
   theme: {
     primaryColor: "#d9a441",
     secondaryColor: "#1fa187",
@@ -35,8 +63,11 @@ export const demoRestaurant: RestaurantConfig = {
 
 export const doroteoRestaurant: RestaurantConfig = {
   id: "doroteo",
+  slug: "doroteo",
   name: "Doroteo",
+  logoUrl: "",
   active: true,
+  isActive: true,
   businessType: "antro",
   managerName: "Sofia Garza",
   managerWhatsapp: "8111122233",
@@ -54,10 +85,35 @@ export const doroteoRestaurant: RestaurantConfig = {
   audienceType: "Joven adulto 23-35, alto consumo en fin de semana.",
   notes: "Perfil ideal para activaciones cortas antes del pico de DJ.",
   commissionPercent: 25,
+  commissionHLPercent: 0,
+  commissionRestaurantPercent: 25,
   allowedTableCounts: [20, 30, 50],
   allowedPrices: [100, 150, 200, 300],
-  allowedModes: ["four_corners", "x_shape"],
+  allowedModes: ["four_corners", "x_shape", "full_card"],
   enabledGames: ["loteria"],
+  primaryColor: "#1fa187",
+  secondaryColor: "#c0392b",
+  accentColor: "#d9a441",
+  autoplayDefault: true,
+  autoplayInterval: 3000,
+  showClock: true,
+  showSponsors: true,
+  showPromotions: true,
+  showQRPromo: true,
+  promoTitle: "Loteria de alto consumo",
+  promoSubtitle: "Premios live antes del pico de DJ.",
+  promoImageUrl: "",
+  standbyTitle: "HOSTER LIVE",
+  standbySubtitle: "La proxima jugada esta por comenzar",
+  standbyImageUrl: "",
+  standbyPromoText: "Compra tus tablas con tu hostess",
+  standbyCtaText: "Pide tu tabla ahora",
+  standbyCtaQrUrl: "",
+  standbyRotatePromotions: true,
+  instagram: "https://instagram.com/doroteomx",
+  facebook: "https://facebook.com/doroteomx",
+  tiktok: "https://tiktok.com/@doroteomx",
+  qrCampaignId: "",
   theme: {
     primaryColor: "#1fa187",
     secondaryColor: "#c0392b",
@@ -101,11 +157,21 @@ function normalizeStringArray(value: unknown, fallback: string[] = []) {
 
 function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig {
   const fallback = fallbackById.get(value.id ?? "") ?? demoRestaurant;
+  const active = value.isActive ?? value.active ?? true;
+  const commissionHLPercent = normalizeNumber(value.commissionHLPercent, 0);
+  const commissionRestaurantPercent = normalizeNumber(
+    value.commissionRestaurantPercent,
+    normalizeNumber(value.commissionPercent, fallback.commissionRestaurantPercent),
+  );
+  const commissionNetPercent = commissionHLPercent + commissionRestaurantPercent;
 
   return {
     id: value.id ?? crypto.randomUUID(),
+    slug: normalizeText(value.slug, value.id ?? fallback.slug),
     name: normalizeText(value.name, fallback.name),
-    active: value.active ?? true,
+    logoUrl: normalizeText(value.logoUrl, fallback.logoUrl),
+    active,
+    isActive: active,
     businessType: isBusinessType(value.businessType) ? value.businessType : fallback.businessType,
     managerName: normalizeText(value.managerName, fallback.managerName),
     managerWhatsapp: normalizeText(value.managerWhatsapp, fallback.managerWhatsapp),
@@ -125,16 +191,54 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
     ),
     audienceType: normalizeText(value.audienceType, fallback.audienceType),
     notes: normalizeText(value.notes, fallback.notes),
-    commissionPercent: normalizeNumber(value.commissionPercent, fallback.commissionPercent),
+    commissionPercent: commissionNetPercent,
+    commissionHLPercent,
+    commissionRestaurantPercent,
     allowedTableCounts: value.allowedTableCounts?.length
       ? value.allowedTableCounts
       : fallback.allowedTableCounts,
     allowedPrices: value.allowedPrices?.length ? value.allowedPrices : fallback.allowedPrices,
     allowedModes: value.allowedModes?.length ? value.allowedModes : fallback.allowedModes,
     enabledGames: value.enabledGames?.length ? value.enabledGames : fallback.enabledGames,
-    theme: value.theme ?? fallback.theme ?? {
-      primaryColor: "#d9a441",
-      secondaryColor: "#1fa187",
+    primaryColor: normalizeText(
+      value.primaryColor,
+      value.theme?.primaryColor ?? fallback.primaryColor,
+    ),
+    secondaryColor: normalizeText(
+      value.secondaryColor,
+      value.theme?.secondaryColor ?? fallback.secondaryColor,
+    ),
+    accentColor: normalizeText(value.accentColor, fallback.accentColor),
+    autoplayDefault: value.autoplayDefault ?? fallback.autoplayDefault,
+    autoplayInterval: normalizeNumber(value.autoplayInterval, fallback.autoplayInterval),
+    showClock: value.showClock ?? fallback.showClock,
+    showSponsors: value.showSponsors ?? fallback.showSponsors,
+    showPromotions: value.showPromotions ?? fallback.showPromotions,
+    showQRPromo: value.showQRPromo ?? fallback.showQRPromo,
+    promoTitle: normalizeText(value.promoTitle, fallback.promoTitle),
+    promoSubtitle: normalizeText(value.promoSubtitle, fallback.promoSubtitle),
+    promoImageUrl: normalizeText(value.promoImageUrl, fallback.promoImageUrl),
+    standbyTitle: normalizeText(value.standbyTitle, fallback.standbyTitle),
+    standbySubtitle: normalizeText(value.standbySubtitle, fallback.standbySubtitle),
+    standbyImageUrl: normalizeText(value.standbyImageUrl, fallback.standbyImageUrl),
+    standbyPromoText: normalizeText(value.standbyPromoText, fallback.standbyPromoText),
+    standbyCtaText: normalizeText(value.standbyCtaText, fallback.standbyCtaText),
+    standbyCtaQrUrl: normalizeText(value.standbyCtaQrUrl, fallback.standbyCtaQrUrl),
+    standbyRotatePromotions:
+      value.standbyRotatePromotions ?? fallback.standbyRotatePromotions,
+    instagram: normalizeText(value.instagram, value.instagramUrl ?? fallback.instagram),
+    facebook: normalizeText(value.facebook, value.facebookUrl ?? fallback.facebook),
+    tiktok: normalizeText(value.tiktok, value.tiktokUrl ?? fallback.tiktok),
+    qrCampaignId: normalizeText(value.qrCampaignId, fallback.qrCampaignId),
+    theme: {
+      primaryColor: normalizeText(
+        value.theme?.primaryColor,
+        value.primaryColor ?? fallback.primaryColor,
+      ),
+      secondaryColor: normalizeText(
+        value.theme?.secondaryColor,
+        value.secondaryColor ?? fallback.secondaryColor,
+      ),
     },
   };
 }
@@ -185,40 +289,14 @@ export function saveRestaurants(restaurants: RestaurantConfig[]) {
 }
 
 export function createRestaurant(
-  restaurant: Omit<RestaurantConfig, "id" | "active" | "enabledGames" | "theme"> &
-    Partial<Pick<RestaurantConfig, "id" | "active" | "enabledGames" | "theme">>,
+  restaurant: Partial<RestaurantConfig> & Pick<RestaurantConfig, "name">,
 ) {
   const restaurants = getRestaurants();
-  const createdRestaurant: RestaurantConfig = {
+  const createdRestaurant = normalizeRestaurant({
+    ...restaurant,
     id: restaurant.id ?? crypto.randomUUID(),
-    name: restaurant.name,
-    active: restaurant.active ?? true,
-    businessType: restaurant.businessType,
-    managerName: restaurant.managerName,
-    managerWhatsapp: restaurant.managerWhatsapp,
-    managerEmail: restaurant.managerEmail,
-    ownerName: restaurant.ownerName,
-    ownerWhatsapp: restaurant.ownerWhatsapp,
-    address: restaurant.address,
-    googleMapsUrl: restaurant.googleMapsUrl,
-    instagramUrl: restaurant.instagramUrl,
-    facebookUrl: restaurant.facebookUrl,
-    tiktokUrl: restaurant.tiktokUrl,
-    averageHostesses: restaurant.averageHostesses,
-    strongDays: restaurant.strongDays,
-    estimatedGamesPerWeek: restaurant.estimatedGamesPerWeek,
-    audienceType: restaurant.audienceType,
-    notes: restaurant.notes,
-    commissionPercent: restaurant.commissionPercent,
-    allowedTableCounts: restaurant.allowedTableCounts,
-    allowedPrices: restaurant.allowedPrices,
-    allowedModes: restaurant.allowedModes,
-    enabledGames: restaurant.enabledGames ?? ["loteria"],
-    theme: restaurant.theme ?? {
-      primaryColor: "#d9a441",
-      secondaryColor: "#1fa187",
-    },
-  };
+    slug: restaurant.slug ?? restaurant.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+  });
 
   saveRestaurants([...restaurants, createdRestaurant]);
   return createdRestaurant;
@@ -230,7 +308,7 @@ export function updateRestaurant(
 ) {
   const restaurants = getRestaurants();
   const updatedRestaurants = restaurants.map((restaurant) =>
-    restaurant.id === restaurantId ? { ...restaurant, ...updates } : restaurant,
+    restaurant.id === restaurantId ? normalizeRestaurant({ ...restaurant, ...updates }) : restaurant,
   );
 
   saveRestaurants(updatedRestaurants);
@@ -240,7 +318,25 @@ export function updateRestaurant(
 export function toggleRestaurant(restaurantId: string) {
   const restaurants = getRestaurants();
   const updatedRestaurants = restaurants.map((restaurant) =>
-    restaurant.id === restaurantId ? { ...restaurant, active: !restaurant.active } : restaurant,
+    restaurant.id === restaurantId
+      ? { ...restaurant, active: !restaurant.active, isActive: !restaurant.active }
+      : restaurant,
+  );
+
+  saveRestaurants(updatedRestaurants);
+  return updatedRestaurants.find((restaurant) => restaurant.id === restaurantId);
+}
+
+export function getRestaurantById(restaurantId: string) {
+  return getRestaurants().find(
+    (restaurant) => restaurant.id === restaurantId || restaurant.slug === restaurantId,
+  );
+}
+
+export function archiveRestaurant(restaurantId: string) {
+  const restaurants = getRestaurants();
+  const updatedRestaurants = restaurants.map((restaurant) =>
+    restaurant.id === restaurantId ? { ...restaurant, active: false, isActive: false } : restaurant,
   );
 
   saveRestaurants(updatedRestaurants);

@@ -14,7 +14,7 @@ export type DemoGameConfig = {
 export const configStorageKey = "loteria:demo-config";
 export const defaultRestaurantId = "rancho-viejo";
 
-const modes: WinMode[] = ["four_corners", "x_shape", "center_four"];
+const modes: WinMode[] = ["four_corners", "x_shape", "center_four", "full_card"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -34,7 +34,7 @@ export function createDefaultDemoConfig(restaurantId = defaultRestaurantId): Dem
   const restaurant = getRestaurantById(restaurantId);
   const activeTables = restaurant.allowedTableCounts[restaurant.allowedTableCounts.length - 1];
   const tablePrice = restaurant.allowedPrices[0];
-  const commissionPercent = restaurant.commissionPercent;
+  const commissionPercent = restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
 
   return {
     restaurantId: restaurant.id,
@@ -62,8 +62,12 @@ export function normalizeDemoConfig(
     asNumber(value.activeBoards) ??
     restaurant.allowedTableCounts[restaurant.allowedTableCounts.length - 1];
   const tablePrice =
-    asNumber(value.tablePrice) ?? asNumber(value.pricePerBoard) ?? restaurant.allowedPrices[0];
-  const commissionPercent = asNumber(value.commissionPercent) ?? restaurant.commissionPercent;
+    asNumber(value.tablePrice) ??
+    asNumber(value.pricePerBoard) ??
+    restaurant.allowedPrices[0];
+  const commissionPercent =
+    asNumber(value.commissionPercent) ??
+    restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
   const mode = asMode(value.mode) ?? restaurant.allowedModes[0];
   const safeActiveTables = restaurant.allowedTableCounts.includes(activeTables)
     ? activeTables

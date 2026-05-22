@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   CircleDollarSign,
   Clock3,
+  Megaphone,
   Pause,
   Play,
   Power,
@@ -42,9 +43,11 @@ const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
   x_shape: "Figura X",
   center_four: "Centro 4",
+  full_card: "Llena",
 };
 
 const speedOptions = [3000, 5000, 8000];
+const countdownOptions = [60, 180, 300];
 
 type WinnerState = {
   folio: string;
@@ -57,6 +60,21 @@ function formatCurrency(value: number) {
     currency: "MXN",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function getCountdownRemainingSeconds(session: Session | null) {
+  if (!session?.preStartStartedAt || session.autoplayStatus !== "countdown") {
+    return session?.preStartCountdownSeconds ?? 0;
+  }
+
+  const startedAt = new Date(session.preStartStartedAt).getTime();
+
+  if (!Number.isFinite(startedAt)) {
+    return session.preStartCountdownSeconds;
+  }
+
+  const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+  return Math.max(0, session.preStartCountdownSeconds - elapsedSeconds);
 }
 
 function getBatchForSession(session: Session) {
@@ -84,8 +102,9 @@ export default function JugadaActivaPage() {
   const [activeBatch, setActiveBatch] = useState<BoardBatch | null>(null);
   const [calledCards, setCalledCards] = useState<LoteriaCard[]>([]);
   const [winner, setWinner] = useState<WinnerState | null>(null);
-  const [isAutoplay, setIsAutoplay] = useState(false);
   const [intervalMs, setIntervalMs] = useState(5000);
+  const [countdownSeconds, setCountdownSeconds] = useState(60);
+  const [countdownRemaining, setCountdownRemaining] = useState(0);
 
   const restaurantId = currentUser?.restaurantId;
 
@@ -102,6 +121,8 @@ export default function JugadaActivaPage() {
   const nextCard = session ? deck[session.calledCards.length] ?? null : null;
   const progressPercent = Math.round((calledCards.length / 54) * 100);
   const statusLabel = session?.status === "active" ? "activa" : "finalizada";
+  const autoplayStatus = session?.autoplayStatus ?? "idle";
+  const activePromotions = session?.activePromotions ?? [];
 
   const syncActiveSession = useCallback(() => {
     if (!restaurantId) {
@@ -109,7 +130,6 @@ export default function JugadaActivaPage() {
       setActiveBatch(null);
       setCalledCards([]);
       setWinner(null);
-      setIsAutoplay(false);
       return;
     }
 
@@ -122,23 +142,30 @@ export default function JugadaActivaPage() {
     setCalledCards(normalizedSession ? hydrateSessionCards(normalizedSession.calledCards) : []);
     setWinner(getWinnerFromSession(normalizedSession));
 
-    if (!normalizedSession || normalizedSession.winnerFolio) {
-      setIsAutoplay(false);
-    }
-
   }, [restaurantId, session?.id]);
 
   useEffect(() => {
     syncActiveSession();
     const intervalId = globalThis.setInterval(syncActiveSession, 900);
-    return () => globalThis.clearInterval(intervalId);
+    window.addEventListener("storage", syncActiveSession);
+    return () => {
+      globalThis.clearInterval(intervalId);
+      window.removeEventListener("storage", syncActiveSession);
+    };
   }, [syncActiveSession]);
+
+  useEffect(() => {
+    const updateCountdown = () => setCountdownRemaining(getCountdownRemainingSeconds(session));
+
+    updateCountdown();
+    const intervalId = globalThis.setInterval(updateCountdown, 500);
+    return () => globalThis.clearInterval(intervalId);
+  }, [session]);
 
   const advanceSession = useCallback((sessionId: string) => {
     const latestSession = getSessionById(sessionId);
 
     if (!latestSession || latestSession.status !== "active" || latestSession.winnerFolio) {
-      setIsAutoplay(false);
       return;
     }
 
@@ -150,7 +177,6 @@ export default function JugadaActivaPage() {
       : [];
 
     if (!nextSessionCard) {
-      setIsAutoplay(false);
       return;
     }
 
@@ -168,6 +194,7 @@ export default function JugadaActivaPage() {
     if (winningBoard) {
       updates.winnerFolio = winningBoard.board.folio;
       updates.winnerCards = winningBoard.result.winningCards.map((card) => card.id);
+      updates.autoplayStatus = "finished";
     }
 
     const updatedSession = updateSession(latestSession.id, updates) ?? latestSession;
@@ -176,9 +203,6 @@ export default function JugadaActivaPage() {
     setCalledCards(hydrateSessionCards(updatedSession.calledCards));
     setWinner(getWinnerFromSession(updatedSession));
 
-    if (winningBoard) {
-      setIsAutoplay(false);
-    }
   }, []);
 
   const callNextCard = useCallback(() => {
@@ -190,13 +214,30 @@ export default function JugadaActivaPage() {
   }, [advanceSession, nextCard, session?.id, winner]);
 
   useEffect(() => {
-    if (!isAutoplay || !session?.id || winner) {
+    if (!session?.id || autoplayStatus !== "countdown") {
       return;
     }
 
-    const intervalId = globalThis.setInterval(() => advanceSession(session.id), intervalMs);
+    if (countdownRemaining <= 0) {
+      updateSession(session.id, {
+        autoplayStatus: "playing",
+        autoplayStartedAt: new Date().toISOString(),
+      });
+      syncActiveSession();
+    }
+  }, [autoplayStatus, countdownRemaining, session?.id, syncActiveSession]);
+
+  useEffect(() => {
+    if (!session?.id || autoplayStatus !== "playing" || winner) {
+      return;
+    }
+
+    const intervalId = globalThis.setInterval(
+      () => advanceSession(session.id),
+      (session.autoplayIntervalSeconds ?? intervalMs / 1000) * 1000,
+    );
     return () => globalThis.clearInterval(intervalId);
-  }, [advanceSession, intervalMs, isAutoplay, session?.id, winner]);
+  }, [advanceSession, autoplayStatus, intervalMs, session?.autoplayIntervalSeconds, session?.id, winner]);
 
   function closeActiveSession() {
     if (!session) {
@@ -207,12 +248,62 @@ export default function JugadaActivaPage() {
       calledCards: session.calledCards,
       winnerFolio: session.winnerFolio,
       winnerCards: session.winnerCards,
+      autoplayStatus: "finished",
     });
-    setIsAutoplay(false);
     setSession(null);
     setActiveBatch(null);
     setCalledCards([]);
     setWinner(null);
+  }
+
+  function startCountdown() {
+    if (!session) {
+      return;
+    }
+
+    updateSession(session.id, {
+      autoplayStatus: "countdown",
+      preStartCountdownSeconds: countdownSeconds,
+      preStartStartedAt: new Date().toISOString(),
+      autoplayStartedAt: undefined,
+    });
+    syncActiveSession();
+  }
+
+  function startAutoplayDirect() {
+    if (!session) {
+      return;
+    }
+
+    updateSession(session.id, {
+      autoplayStatus: "playing",
+      autoplayIntervalSeconds: intervalMs / 1000,
+      autoplayStartedAt: new Date().toISOString(),
+    });
+    syncActiveSession();
+  }
+
+  function pauseAutoplay() {
+    if (!session) {
+      return;
+    }
+
+    updateSession(session.id, {
+      autoplayStatus: "paused",
+    });
+    syncActiveSession();
+  }
+
+  function resumeAutoplay() {
+    if (!session) {
+      return;
+    }
+
+    updateSession(session.id, {
+      autoplayStatus: "playing",
+      autoplayStartedAt: session.autoplayStartedAt ?? new Date().toISOString(),
+    });
+    syncActiveSession();
   }
 
   if (!session) {
@@ -227,8 +318,8 @@ export default function JugadaActivaPage() {
             Crea una jugada para el restaurante del gerente y esta pantalla tomara el control
             operativo en vivo.
           </p>
-          <ButtonLink href="/gerente/nueva-jugada" className="mt-6">
-            Ir a nueva jugada
+          <ButtonLink href="/gerente" className="mt-6">
+            Ir al panel rapido
           </ButtonLink>
         </Card>
       </Layout>
@@ -268,7 +359,7 @@ export default function JugadaActivaPage() {
             <InfoTile label="Costo tabla" value={formatCurrency(session.tablePrice)} />
             <InfoTile label="Premio" value={formatCurrency(session.prizeAmount)} />
             <InfoTile label="Cartas cantadas" value={`${calledCards.length}/54`} />
-            <InfoTile label="Estado" value={statusLabel} />
+            <InfoTile label="Estado" value={autoplayStatus} />
           </div>
         </Card>
 
@@ -292,6 +383,83 @@ export default function JugadaActivaPage() {
           </div>
         </Card>
       </div>
+
+      {autoplayStatus === "idle" || autoplayStatus === "countdown" ? (
+        <Card accent className="mt-4 border-mezcal/40 bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.18),rgba(20,17,15,0.94)_52%,rgba(8,7,6,0.98)_100%)]">
+          <div className="grid gap-5 lg:grid-cols-[1fr_24rem] lg:items-center">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.3em] text-mezcal">
+                Preinicio
+              </p>
+              <h3 className="mt-2 font-display text-5xl text-bone">
+                La jugada está por comenzar
+              </h3>
+              <p className="mt-2 text-sm font-semibold text-bone/62">
+                Promos activas durante esta jugada
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {activePromotions.length ? (
+                  activePromotions.map((promotion) => (
+                    <div key={promotion.id} className="rounded-lg border border-bone/10 bg-bone/[0.04] p-4">
+                      <div className="flex items-start gap-3">
+                        <Megaphone className="mt-1 shrink-0 text-mezcal" size={18} />
+                        <div>
+                          <p className="font-black text-bone">{promotion.title}</p>
+                          <p className="mt-1 text-sm leading-5 text-bone/58">{promotion.message}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed border-bone/15 p-4 text-sm text-bone/55">
+                    No hay promociones activas configuradas para esta jugada.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-4">
+              {autoplayStatus === "countdown" ? (
+                <div className="text-center">
+                  <p className="text-xs font-black uppercase tracking-[0.22em] text-mezcal">
+                    Cuenta regresiva
+                  </p>
+                  <p className="mt-2 font-display text-7xl leading-none text-bone">
+                    {countdownRemaining}
+                  </p>
+                  <p className="mt-2 text-sm text-bone/55">segundos restantes</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs font-black uppercase tracking-[0.22em] text-bone/45">
+                    Duracion del preinicio
+                  </p>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    {countdownOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setCountdownSeconds(option)}
+                        className={`h-12 rounded-lg border text-sm font-black transition ${
+                          countdownSeconds === option
+                            ? "border-mezcal bg-mezcal text-obsidian shadow-glow"
+                            : "border-bone/10 bg-bone/[0.04] text-bone hover:bg-bone/10"
+                        }`}
+                      >
+                        {option / 60} min
+                      </button>
+                    ))}
+                  </div>
+                  <Button onClick={startCountdown} className="mt-4 w-full">
+                    <Play size={18} />
+                    Iniciar cuenta regresiva
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       {winner ? (
         <Card className="mt-4 border-mezcal/45 bg-[linear-gradient(90deg,rgba(217,164,65,0.22),rgba(31,161,135,0.16),rgba(217,164,65,0.12))] shadow-glow">
@@ -321,21 +489,36 @@ export default function JugadaActivaPage() {
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">
         <Card className="bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.18),rgba(20,17,15,0.94)_44%,rgba(8,7,6,0.98)_100%)]">
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button onClick={callNextCard} disabled={!nextCard || Boolean(winner)}>
+            <Button
+              onClick={callNextCard}
+              disabled={!nextCard || Boolean(winner) || autoplayStatus === "countdown"}
+            >
               <SkipForward size={18} />
               Cantar siguiente carta
             </Button>
             <Button
               variant="secondary"
-              onClick={() => setIsAutoplay(true)}
-              disabled={!nextCard || Boolean(winner) || isAutoplay}
+              onClick={startAutoplayDirect}
+              disabled={!nextCard || Boolean(winner) || autoplayStatus === "playing"}
             >
               <Play size={18} />
-              Iniciar autoplay
+              Iniciar autoplay directo
             </Button>
-            <Button variant="secondary" onClick={() => setIsAutoplay(false)} disabled={!isAutoplay}>
+            <Button
+              variant="secondary"
+              onClick={pauseAutoplay}
+              disabled={autoplayStatus !== "playing" && autoplayStatus !== "countdown"}
+            >
               <Pause size={18} />
-              Pausar autoplay
+              Pausar
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={resumeAutoplay}
+              disabled={autoplayStatus !== "paused"}
+            >
+              <Play size={18} />
+              Reanudar
             </Button>
             <Button variant="danger" onClick={closeActiveSession}>
               <Power size={18} />
@@ -348,7 +531,15 @@ export default function JugadaActivaPage() {
               <button
                 key={option}
                 type="button"
-                onClick={() => setIntervalMs(option)}
+                onClick={() => {
+                  setIntervalMs(option);
+                  if (session) {
+                    updateSession(session.id, {
+                      autoplayIntervalSeconds: option / 1000,
+                    });
+                    syncActiveSession();
+                  }
+                }}
                 className={`h-9 rounded-lg border px-4 text-xs font-black transition ${
                   intervalMs === option
                     ? "border-agave bg-agave text-obsidian"

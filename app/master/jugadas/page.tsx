@@ -33,15 +33,23 @@ function formatDate(value: string) {
 }
 
 function getGrossRevenue(session: Session) {
-  return session.activeTables * session.tablePrice;
+  return session.grossRevenue ?? session.activeTables * session.tablePrice;
+}
+
+function getCommissionHL(session: Session) {
+  return session.commissionHLAmount ?? getGrossRevenue(session) * ((session.commissionHLPercent ?? 0) / 100);
 }
 
 function getRestaurantCommission(session: Session) {
-  return getGrossRevenue(session) * (session.commissionPercent / 100);
+  return (
+    session.commissionRestaurantAmount ??
+    getGrossRevenue(session) *
+      ((session.commissionRestaurantPercent ?? session.commissionPercent ?? 0) / 100)
+  );
 }
 
-function getHosterLiveRevenue(session: Session) {
-  return Math.max(0, getGrossRevenue(session) - getRestaurantCommission(session) - session.prizeAmount);
+function getNetCommission(session: Session) {
+  return session.commissionNetAmount ?? getCommissionHL(session) + getRestaurantCommission(session);
 }
 
 function statusLabel(status: SessionStatus) {
@@ -110,18 +118,32 @@ export default function MasterJugadasPage() {
         note: "Suma de tablas vendidas",
       },
       {
+        label: "Comision HL",
+        value: formatCurrency(
+          filteredSessions.reduce((total, session) => total + getCommissionHL(session), 0),
+        ),
+        note: "Revenue Hoster Live",
+      },
+      {
+        label: "Comision restaurante",
+        value: formatCurrency(
+          filteredSessions.reduce((total, session) => total + getRestaurantCommission(session), 0),
+        ),
+        note: "Revenue venue",
+      },
+      {
+        label: "Comision neta",
+        value: formatCurrency(
+          filteredSessions.reduce((total, session) => total + getNetCommission(session), 0),
+        ),
+        note: "HL + restaurante",
+      },
+      {
         label: "Premios entregados",
         value: formatCurrency(
           finalizedSessions.reduce((total, session) => total + session.prizeAmount, 0),
         ),
-        note: "Pozo liquidado",
-      },
-      {
-        label: "Utilidad Hoster Live",
-        value: formatCurrency(
-          filteredSessions.reduce((total, session) => total + getHosterLiveRevenue(session), 0),
-        ),
-        note: "Revenue calculado",
+        note: "Bolsa liquidada",
       },
     ];
   }, [filteredSessions]);
@@ -228,9 +250,10 @@ export default function MasterJugadasPage() {
                 <th className="px-5 py-4 font-semibold">Modalidad</th>
                 <th className="px-5 py-4 font-semibold">Tablas</th>
                 <th className="px-5 py-4 font-semibold">Ingreso</th>
-                <th className="px-5 py-4 font-semibold">Comision</th>
+                <th className="px-5 py-4 font-semibold">Comision HL</th>
+                <th className="px-5 py-4 font-semibold">Comision Rest.</th>
+                <th className="px-5 py-4 font-semibold">Comision neta</th>
                 <th className="px-5 py-4 font-semibold">Premio</th>
-                <th className="px-5 py-4 font-semibold">HL revenue</th>
                 <th className="px-5 py-4 font-semibold">Ganador</th>
                 <th className="px-5 py-4 font-semibold">Status</th>
               </tr>
@@ -255,13 +278,17 @@ export default function MasterJugadasPage() {
                     {formatCurrency(getGrossRevenue(session))}
                   </td>
                   <td className="px-5 py-4 text-sm text-bone/68">
-                    {session.commissionPercent}% - {formatCurrency(getRestaurantCommission(session))}
+                    {session.commissionHLPercent}% - {formatCurrency(getCommissionHL(session))}
+                  </td>
+                  <td className="px-5 py-4 text-sm text-bone/68">
+                    {session.commissionRestaurantPercent}% -{" "}
+                    {formatCurrency(getRestaurantCommission(session))}
+                  </td>
+                  <td className="px-5 py-4 text-sm text-bone/68">
+                    {session.commissionNetPercent}% - {formatCurrency(getNetCommission(session))}
                   </td>
                   <td className="px-5 py-4 text-sm text-mezcal">
                     {formatCurrency(session.prizeAmount)}
-                  </td>
-                  <td className="px-5 py-4 font-semibold text-agave">
-                    {formatCurrency(getHosterLiveRevenue(session))}
                   </td>
                   <td className="px-5 py-4">
                     <span className="inline-flex items-center gap-2 rounded-full bg-mezcal/12 px-3 py-1 text-xs font-bold text-mezcal ring-1 ring-mezcal/25">
@@ -314,9 +341,9 @@ export default function MasterJugadasPage() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-bone/42">Utilidad HL</p>
+                  <p className="text-bone/42">Comision HL</p>
                   <p className="mt-1 font-semibold text-agave">
-                    {formatCurrency(getHosterLiveRevenue(session))}
+                    {formatCurrency(getCommissionHL(session))}
                   </p>
                 </div>
                 <div>
