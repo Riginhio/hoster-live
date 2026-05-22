@@ -14,6 +14,8 @@ import {
   type DemoGameConfig,
 } from "@/lib/demoConfig";
 import { calculatePrize, restaurants } from "@/lib/restaurants";
+import { createSession } from "@/lib/sessions/sessionStorage";
+import { getActiveBoardBatch } from "@/lib/boards/boardBatchStorage";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -24,6 +26,7 @@ const modeLabels: Record<WinMode, string> = {
 export default function NuevaJugadaPage() {
   const [config, setConfig] = useState<DemoGameConfig>(() => createDefaultDemoConfig());
   const [savedConfig, setSavedConfig] = useState<DemoGameConfig | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const selectedRestaurant = useMemo(
     () => restaurants.find((restaurant) => restaurant.id === config.restaurantId) ?? restaurants[0],
@@ -80,13 +83,39 @@ export default function NuevaJugadaPage() {
       calculatedPrize,
       createdAt: new Date().toISOString(),
     };
+    const activeBatch = getActiveBoardBatch(selectedRestaurant.id);
+
+    if (!activeBatch) {
+      setFormError(
+        `No existe un lote activo para ${selectedRestaurant.name}. Activa o crea un lote en Master > Lotes.`,
+      );
+      return;
+    }
+
+    if (nextConfig.activeTables > activeBatch.quantity) {
+      setFormError(
+        `El lote activo solo tiene ${activeBatch.quantity} tablas disponibles.`,
+      );
+      return;
+    }
 
     try {
       localStorage.setItem(configStorageKey, JSON.stringify(nextConfig));
+      createSession({
+        batchId: activeBatch.id,
+        restaurantId: selectedRestaurant.id,
+        restaurantName: selectedRestaurant.name,
+        mode: nextConfig.mode,
+        activeTables: nextConfig.activeTables,
+        tablePrice: nextConfig.tablePrice,
+        commissionPercent: nextConfig.commissionPercent,
+        prizeAmount: nextConfig.calculatedPrize,
+      });
     } catch {
       // La experiencia local puede seguir funcionando aunque el navegador bloquee almacenamiento.
     }
 
+    setFormError(null);
     setConfig(nextConfig);
     setSavedConfig(nextConfig);
   }
@@ -219,6 +248,11 @@ export default function NuevaJugadaPage() {
                 </p>
               ) : null}
             </div>
+            {formError ? (
+              <p className="rounded-lg border border-chile/30 bg-chile/10 px-3 py-2 text-sm font-semibold text-[#ff9b91]">
+                {formError}
+              </p>
+            ) : null}
           </form>
         </Card>
 

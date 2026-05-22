@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Pause, Play, RotateCcw, Volume2 } from "lucide-react";
+import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
+import { Pause, Play, Power, RotateCcw, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { BrandMark } from "@/components/brand/BrandMark";
 import {
   checkWinner,
-  generateBoard,
   getWinPattern,
   type LoteriaBoard,
   type LoteriaCard,
@@ -20,6 +20,20 @@ import {
 } from "@/lib/demoConfig";
 import { getRestaurantById } from "@/lib/restaurants";
 import type { WinMode } from "@/lib/loteria";
+import {
+  closeSession,
+  getActiveSession,
+  getSessionById,
+  getSessionDeck,
+  hydrateSessionCards,
+  updateSession,
+  type Session,
+} from "@/lib/sessions/sessionStorage";
+import {
+  getActiveBoardBatch,
+  getBoardBatches,
+  toLoteriaBoards,
+} from "@/lib/boards/boardBatchStorage";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -100,14 +114,10 @@ function playTone(kind: "card" | "winner") {
 }
 
 export function GameScreen({ restaurantId }: GameScreenProps) {
-  const boardsRef = useRef<LoteriaBoard[]>(
-    Array.from({ length: 50 }, (_, index) =>
-      generateBoard(`HL-${String(index + 1).padStart(3, "0")}`),
-    ),
-  );
   const [config, setConfig] = useState<DemoGameConfig>(() =>
     createDefaultDemoConfig(restaurantId),
   );
+  const [batchBoards, setBatchBoards] = useState<LoteriaBoard[]>([]);
   const [deck, setDeck] = useState<LoteriaCard[]>(() => shuffleCards());
   const [calledCards, setCalledCards] = useState<LoteriaCard[]>([]);
   const [winner, setWinner] = useState<WinnerState | null>(null);
@@ -115,9 +125,35 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [countdown, setCountdown] = useState(10);
   const [intervalMs, setIntervalMs] = useState(5000);
   const [cardAnimationKey, setCardAnimationKey] = useState(0);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
 
   useEffect(() => {
     try {
+      const storedSession = getActiveSession(restaurantId);
+
+      if (storedSession) {
+        const sessionBatch = storedSession.batchId
+          ? getBoardBatches().find((batch) => batch.id === storedSession.batchId)
+          : getActiveBoardBatch(restaurantId);
+        setBatchBoards(sessionBatch ? toLoteriaBoards(sessionBatch.boards) : []);
+        setActiveSession(storedSession);
+        setDeck(getSessionDeck(storedSession.id));
+        setConfig({
+          restaurantId: storedSession.restaurantId,
+          activeTables: storedSession.activeTables,
+          mode: storedSession.mode,
+          tablePrice: storedSession.tablePrice,
+          commissionPercent: storedSession.commissionPercent,
+          calculatedPrize: storedSession.prizeAmount,
+          createdAt: storedSession.createdAt,
+        });
+        setCalledCards(hydrateSessionCards(storedSession.calledCards));
+        return;
+      }
+
+      const activeBatch = getActiveBoardBatch(restaurantId);
+      setBatchBoards(activeBatch ? toLoteriaBoards(activeBatch.boards) : []);
+
       const parsedConfig = parseStoredDemoConfig(
         localStorage.getItem(configStorageKey),
         restaurantId,
@@ -134,14 +170,53 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   }, [restaurantId]);
 
   const restaurant = getRestaurantById(restaurantId);
-  const activeBoards = boardsRef.current.slice(0, config.activeTables);
+  const activeBoards = batchBoards.slice(0, config.activeTables);
   const currentCard = calledCards[calledCards.length - 1] ?? null;
   const nextCard = deck[calledCards.length] ?? null;
   const winningCardIds = new Set(winner?.winningCards.map((card) => card.id) ?? []);
   const patternPositions = getWinPattern(config.mode);
-  const previewBoard = winner?.board ?? activeBoards[0];
+  const previewBoard = winner?.board ?? activeBoards[0] ?? null;
   const countdownMessage =
     countdownMessages[Math.min(countdownMessages.length - 1, Math.floor((10 - countdown) / 3))];
+
+  useEffect(() => {
+    if (!activeSession) {
+      return;
+    }
+
+    const syncSession = () => {
+      const latestSession = getSessionById(activeSession.id);
+
+      if (!latestSession) {
+        return;
+      }
+
+      setActiveSession(latestSession);
+      setDeck(getSessionDeck(latestSession.id));
+      setCalledCards(hydrateSessionCards(latestSession.calledCards));
+
+      if (latestSession.winnerFolio && latestSession.winnerCards.length > 0) {
+        const winningBoard = activeBoards.find(
+          (board) => board.folio === latestSession.winnerFolio,
+        );
+
+        if (winningBoard) {
+          setWinner({
+            board: winningBoard,
+            winningCards: hydrateSessionCards(latestSession.winnerCards),
+          });
+          setStatus("finished");
+        }
+      }
+
+      if (latestSession.status === "finalized") {
+        setStatus("finished");
+      }
+    };
+
+    const intervalId = globalThis.setInterval(syncSession, 900);
+    return () => globalThis.clearInterval(intervalId);
+  }, [activeBoards, activeSession]);
 
   const callNextCard = useCallback(() => {
     if (!nextCard || winner) {
@@ -157,6 +232,12 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       .find(({ result }) => result.hasWon);
 
     setCalledCards(nextCalledCards);
+    if (activeSession) {
+      const updatedSession = updateSession(activeSession.id, {
+        calledCards: nextCalledCards.map((card) => card.id),
+      });
+      setActiveSession(updatedSession ?? activeSession);
+    }
     setCardAnimationKey((currentKey) => currentKey + 1);
     playTone("card");
 
@@ -166,9 +247,17 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         winningCards: winningBoard.result.winningCards,
       });
       setStatus("finished");
+      if (activeSession) {
+        const updatedSession = updateSession(activeSession.id, {
+          calledCards: nextCalledCards.map((card) => card.id),
+          winnerFolio: winningBoard.board.folio,
+          winnerCards: winningBoard.result.winningCards.map((card) => card.id),
+        });
+        setActiveSession(updatedSession ?? activeSession);
+      }
       playTone("winner");
     }
-  }, [activeBoards, calledCards, config.mode, nextCard, winner]);
+  }, [activeBoards, activeSession, calledCards, config.mode, nextCard, winner]);
 
   useEffect(() => {
     if (status !== "countdown") {
@@ -199,9 +288,15 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
   useEffect(() => {
     if (!nextCard && status === "playing") {
+      if (activeSession?.status === "active") {
+        const closedSession = closeSession(activeSession.id, {
+          calledCards: calledCards.map((card) => card.id),
+        });
+        setActiveSession(closedSession ?? null);
+      }
       setStatus("finished");
     }
-  }, [nextCard, status]);
+  }, [activeSession, calledCards, nextCard, status]);
 
   function startAutoplay() {
     if (winner || !nextCard) {
@@ -232,6 +327,17 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     setCardAnimationKey(0);
   }
 
+  function finishSession() {
+    if (activeSession?.status === "active") {
+      const closedSession = closeSession(activeSession.id, {
+        calledCards: calledCards.map((card) => card.id),
+      });
+      setActiveSession(closedSession ?? null);
+    }
+
+    setStatus("finished");
+  }
+
   return (
     <div className="screen-safe cantina-grid bg-obsidian p-4 md:p-6">
       <div className="mx-auto grid h-full max-w-[1800px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)_420px]">
@@ -256,11 +362,17 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 }`}
               >
                 <div
-                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-md text-sm font-black ${
-                    isLatest ? "bg-mezcal text-obsidian" : "bg-mezcal/15 text-mezcal"
+                  className={`h-12 w-9 shrink-0 overflow-hidden rounded-md border ${
+                    isLatest ? "border-mezcal bg-mezcal/15" : "border-bone/10 bg-bone/[0.04]"
                   }`}
                 >
-                  {String(calledCards.length - index).padStart(2, "0")}
+                  <Image
+                    src={card.image}
+                    alt={card.name}
+                    width={90}
+                    height={140}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-bone">{card.name}</p>
@@ -338,6 +450,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 <RotateCcw className="h-4 w-4" />
                 Reiniciar demo
               </Button>
+              <Button
+                variant="danger"
+                onClick={finishSession}
+                disabled={activeSession?.status !== "active"}
+              >
+                <Power className="h-4 w-4" />
+                Finalizar jugada
+              </Button>
             </div>
 
             <div className="mb-5 flex flex-wrap justify-center gap-2">
@@ -379,23 +499,25 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             </div>
             <div
               key={cardAnimationKey}
-              className="loteria-card-reveal relative aspect-[3/4] w-full max-w-[360px] rounded-lg border-2 border-mezcal bg-bone p-3 shadow-glow md:max-w-[440px]"
+              className="loteria-card-reveal relative aspect-[0.63] w-full max-w-[360px] overflow-hidden rounded-lg border-2 border-mezcal bg-bone shadow-glow md:max-w-[440px]"
             >
-              <div className="flex h-full flex-col justify-between rounded-md border-2 border-obsidian/85 bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-obsidian">
-                <div className="flex items-center justify-between text-sm font-black uppercase tracking-[0.22em]">
-                  <span>Hoster Live</span>
-                  <span>{currentCard ? String(currentCard.number).padStart(2, "0") : "Demo"}</span>
-                </div>
-                <div className="grid flex-1 place-items-center">
+              {currentCard ? (
+                <Image
+                  src={currentCard.image}
+                  alt={currentCard.name}
+                  width={720}
+                  height={1141}
+                  className="h-full w-full object-contain"
+                  priority
+                />
+              ) : (
+                <div className="grid h-full place-items-center bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-obsidian">
                   <BrandMark
                     className="h-36 w-36 border-obsidian/65 shadow-none md:h-44 md:w-44"
                     textClassName="text-[4rem] leading-none md:text-[5rem]"
                   />
                 </div>
-                <h2 className="font-display text-5xl leading-none md:text-7xl">
-                  {currentCard?.name ?? "Lista"}
-                </h2>
-              </div>
+              )}
             </div>
             <p className="mt-5 text-sm font-semibold uppercase tracking-[0.28em] text-bone/50">
               Carta actual
@@ -413,9 +535,18 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 </div>
                 <div className="text-sm font-semibold text-bone/75">
                   <p className="text-2xl font-black text-bone">${config.calculatedPrize}</p>
-                  <p className="mt-1 text-bone/50">
-                    Cartas: {winner.winningCards.map((card) => card.name).join(", ")}
-                  </p>
+                  <div className="mt-2 flex flex-wrap justify-center gap-2 md:justify-end">
+                    {winner.winningCards.map((card) => (
+                      <Image
+                        key={card.id}
+                        src={card.image}
+                        alt={card.name}
+                        width={90}
+                        height={140}
+                        className="h-16 w-10 rounded border border-bone/15 object-cover"
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -428,13 +559,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-agave">
                 {winner ? "Tabla ganadora" : "Tabla demo"}
               </p>
-              <h2 className="font-display text-3xl text-bone">{previewBoard.folio}</h2>
+              <h2 className="font-display text-3xl text-bone">{previewBoard?.folio ?? "Sin lote"}</h2>
             </div>
             <span className="rounded-full bg-mezcal/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-mezcal">
               {modeLabels[config.mode]}
             </span>
           </div>
 
+          {previewBoard ? (
           <div className="grid grid-cols-4 gap-2">
             {previewBoard.cards.flatMap((row, rowIndex) =>
               row.map((card, colIndex) => {
@@ -457,15 +589,26 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                             : "border-bone/10 bg-bone/[0.04] text-bone/70"
                     }`}
                   >
-                    <span className="text-xs font-black">{String(card.number).padStart(2, "0")}</span>
-                    <span className="overflow-hidden text-ellipsis text-xs font-semibold leading-tight">
-                      {card.name}
+                    <Image
+                      src={card.image}
+                      alt={card.name}
+                      width={90}
+                      height={140}
+                      className="min-h-0 flex-1 rounded object-cover"
+                    />
+                    <span className="mt-1 text-[10px] font-black">
+                      {String(card.number).padStart(2, "0")}
                     </span>
                   </div>
                 );
               }),
             )}
           </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-bone/15 p-5 text-sm text-bone/55">
+              No hay lote activo disponible para este restaurante.
+            </div>
+          )}
 
           <div className="mt-5 grid gap-3 text-sm">
             <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-3">
@@ -494,9 +637,20 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             <p className="mt-1 text-5xl font-black text-bone md:text-7xl">
               ${config.calculatedPrize}
             </p>
-            <p className="mx-auto mt-6 max-w-2xl text-sm font-semibold text-bone/65 md:text-base">
-              Cartas ganadoras: {winner.winningCards.map((card) => card.name).join(", ")}
-            </p>
+            <div className="mx-auto mt-6 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+              {winner.winningCards.map((card) => (
+                <div key={card.id} className="rounded-lg border border-bone/10 bg-bone/[0.04] p-2">
+                  <Image
+                    src={card.image}
+                    alt={card.name}
+                    width={120}
+                    height={190}
+                    className="mx-auto h-32 w-auto rounded object-contain"
+                  />
+                  <p className="mt-2 text-xs font-semibold text-bone/70">{card.name}</p>
+                </div>
+              ))}
+            </div>
             <Button className="mt-8" onClick={resetGame}>
               <RotateCcw className="h-4 w-4" />
               Reiniciar demo

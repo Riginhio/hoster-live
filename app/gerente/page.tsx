@@ -16,7 +16,15 @@ export default function GerentePage() {
         <p className="mt-3 max-w-2xl text-bone/62">
           Configura mesas, premio y experiencia visible en la pantalla live.
         </p>
-        <ButtonLink href="/gerente/nueva-jugada" className="mt-6">Crear jugada</ButtonLink>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <ButtonLink href="/gerente/nueva-jugada">Crear jugada</ButtonLink>
+          <ButtonLink href="/gerente/jugada-activa" variant="secondary">
+            Jugada activa
+          </ButtonLink>
+          <ButtonLink href="/gerente/tablas" variant="secondary">
+            Ver tablas
+          </ButtonLink>
+        </div>
       </Card>
     </Layout>
   );

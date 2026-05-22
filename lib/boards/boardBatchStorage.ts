@@ -1,0 +1,248 @@
+import {
+  loteriaCards,
+  type LoteriaBoard,
+  type LoteriaCard,
+} from "@/lib/loteria";
+
+export type BoardBatchStatus = "active" | "inactive" | "archived";
+
+export type Board = {
+  id: string;
+  batchId: string;
+  restaurantId: string;
+  folio: string;
+  cards: LoteriaCard[][];
+  qrPayload: string;
+  isActive: boolean;
+};
+
+export type BoardBatch = {
+  id: string;
+  restaurantId: string;
+  restaurantName: string;
+  name: string;
+  quantity: number;
+  status: BoardBatchStatus;
+  validFrom: string;
+  validTo: string;
+  boards: Board[];
+  createdAt: string;
+};
+
+export const boardBatchesStorageKey = "hoster-live:board-batches";
+
+function hasLocalStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function createId(prefix: string) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}`;
+}
+
+function seededShuffle(cards: LoteriaCard[], seed: number) {
+  const shuffled = [...cards];
+  let state = seed;
+
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    const randomIndex = state % (index + 1);
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+  }
+
+  return shuffled;
+}
+
+function createBoardCards(seed: number) {
+  const selectedCards = seededShuffle(loteriaCards, seed).slice(0, 16);
+
+  return [
+    selectedCards.slice(0, 4),
+    selectedCards.slice(4, 8),
+    selectedCards.slice(8, 12),
+    selectedCards.slice(12, 16),
+  ];
+}
+
+function createBoardsForBatch(batchId: string, restaurantId: string, quantity: number): Board[] {
+  return Array.from({ length: quantity }, (_, index) => {
+    const folio = `HL-${String(index + 1).padStart(3, "0")}`;
+
+    return {
+      id: `${batchId}-${folio}`,
+      batchId,
+      restaurantId,
+      folio,
+      cards: createBoardCards(index + 1401),
+      qrPayload: JSON.stringify({
+        batchId,
+        restaurantId,
+        folio,
+      }),
+      isActive: true,
+    };
+  });
+}
+
+function createDefaultBatch(
+  restaurantId: string,
+  restaurantName: string,
+  name: string,
+): BoardBatch {
+  const id = `batch-${restaurantId}-default`;
+  const validFrom = "2026-05-01";
+  const validTo = "2026-12-31";
+
+  return {
+    id,
+    restaurantId,
+    restaurantName,
+    name,
+    quantity: 50,
+    status: "active",
+    validFrom,
+    validTo,
+    boards: createBoardsForBatch(id, restaurantId, 50),
+    createdAt: "2026-05-21T00:00:00.000Z",
+  };
+}
+
+export const defaultBoardBatches: BoardBatch[] = [
+  createDefaultBatch("rancho-viejo", "Rancho Viejo", "Lote operativo Rancho Viejo"),
+  createDefaultBatch("doroteo", "Doroteo", "Lote operativo Doroteo"),
+];
+
+function normalizeBatch(batch: BoardBatch): BoardBatch {
+  return {
+    ...batch,
+    boards: batch.boards?.length
+      ? batch.boards
+      : createBoardsForBatch(batch.id, batch.restaurantId, batch.quantity),
+  };
+}
+
+function mergeDefaultBatches(batches: BoardBatch[]) {
+  const existingIds = new Set(batches.map((batch) => batch.id));
+  const missingDefaults = defaultBoardBatches.filter((batch) => !existingIds.has(batch.id));
+
+  return [...batches, ...missingDefaults];
+}
+
+export function getBoardBatches(): BoardBatch[] {
+  if (!hasLocalStorage()) {
+    return defaultBoardBatches;
+  }
+
+  const rawValue = window.localStorage.getItem(boardBatchesStorageKey);
+
+  if (!rawValue) {
+    saveBoardBatches(defaultBoardBatches);
+    return defaultBoardBatches;
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue) as BoardBatch[];
+    const batches = Array.isArray(parsedValue)
+      ? mergeDefaultBatches(parsedValue.map(normalizeBatch))
+      : defaultBoardBatches;
+    saveBoardBatches(batches);
+    return batches;
+  } catch {
+    saveBoardBatches(defaultBoardBatches);
+    return defaultBoardBatches;
+  }
+}
+
+export function saveBoardBatches(batches: BoardBatch[]) {
+  if (!hasLocalStorage()) {
+    return batches;
+  }
+
+  window.localStorage.setItem(boardBatchesStorageKey, JSON.stringify(batches));
+  return batches;
+}
+
+export function getActiveBoardBatch(restaurantId: string) {
+  return getBoardBatches().find(
+    (batch) => batch.restaurantId === restaurantId && batch.status === "active",
+  );
+}
+
+export function createBoardBatch(input: {
+  restaurantId: string;
+  restaurantName: string;
+  name: string;
+  quantity: number;
+  validFrom: string;
+  validTo: string;
+  activate?: boolean;
+}) {
+  const id = createId("batch");
+  const batch: BoardBatch = {
+    id,
+    restaurantId: input.restaurantId,
+    restaurantName: input.restaurantName,
+    name: input.name,
+    quantity: input.quantity,
+    status: input.activate ?? true ? "active" : "inactive",
+    validFrom: input.validFrom,
+    validTo: input.validTo,
+    boards: createBoardsForBatch(id, input.restaurantId, input.quantity),
+    createdAt: new Date().toISOString(),
+  };
+  const currentBatches = getBoardBatches();
+  const nextBatches =
+    batch.status === "active"
+      ? currentBatches.map((currentBatch) =>
+          currentBatch.restaurantId === batch.restaurantId && currentBatch.status === "active"
+            ? { ...currentBatch, status: "inactive" as const }
+            : currentBatch,
+        )
+      : currentBatches;
+
+  saveBoardBatches([batch, ...nextBatches]);
+  return batch;
+}
+
+export function activateBoardBatch(batchId: string) {
+  const batches = getBoardBatches();
+  const selectedBatch = batches.find((batch) => batch.id === batchId);
+
+  if (!selectedBatch) {
+    return undefined;
+  }
+
+  const updatedBatches = batches.map((batch) => {
+    if (batch.id === batchId) {
+      return { ...batch, status: "active" as const };
+    }
+
+    if (batch.restaurantId === selectedBatch.restaurantId && batch.status === "active") {
+      return { ...batch, status: "inactive" as const };
+    }
+
+    return batch;
+  });
+
+  saveBoardBatches(updatedBatches);
+  return updatedBatches.find((batch) => batch.id === batchId);
+}
+
+export function archiveBoardBatch(batchId: string) {
+  const updatedBatches = getBoardBatches().map((batch) =>
+    batch.id === batchId ? { ...batch, status: "archived" as const } : batch,
+  );
+
+  saveBoardBatches(updatedBatches);
+  return updatedBatches.find((batch) => batch.id === batchId);
+}
+
+export function toLoteriaBoards(boards: Board[]): LoteriaBoard[] {
+  return boards.map((board) => ({
+    folio: board.folio,
+    cards: board.cards,
+  }));
+}

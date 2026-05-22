@@ -1,12 +1,16 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleDollarSign, Trophy } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import {
-  dashboardKpis,
-  recentGameActivity,
-  restaurantRanking,
-  weeklyMetrics,
+  dashboardKpis as mockDashboardKpis,
+  recentGameActivity as mockRecentGameActivity,
+  restaurantRanking as mockRestaurantRanking,
+  weeklyMetrics as mockWeeklyMetrics,
 } from "@/lib/mockAnalytics";
+import { getSessions, type Session } from "@/lib/sessions/sessionStorage";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-MX", {
@@ -21,6 +25,10 @@ function statusLabel(status: string) {
     return "Activo";
   }
 
+  if (status === "finalized") {
+    return "Finalizado";
+  }
+
   if (status === "paused") {
     return "Pausado";
   }
@@ -33,6 +41,10 @@ function statusClassName(status: string) {
     return "bg-agave/16 text-agave ring-agave/35";
   }
 
+  if (status === "finalized") {
+    return "bg-mezcal/14 text-mezcal ring-mezcal/28";
+  }
+
   if (status === "paused") {
     return "bg-bone/8 text-bone/52 ring-bone/10";
   }
@@ -41,8 +53,141 @@ function statusClassName(status: string) {
 }
 
 export default function MasterDashboardPage() {
-  const maxRevenue = Math.max(...weeklyMetrics.map((metric) => metric.revenue));
-  const maxGames = Math.max(...weeklyMetrics.map((metric) => metric.games));
+  const [sessions, setSessions] = useState<Session[]>([]);
+
+  useEffect(() => {
+    setSessions(getSessions());
+  }, []);
+
+  const sessionMetrics = useMemo(() => {
+    const validSessions = sessions.filter((session) => session.status !== "active" || session.calledCards.length > 0);
+    const grossRevenue = validSessions.reduce(
+      (total, session) => total + session.activeTables * session.tablePrice,
+      0,
+    );
+    const restaurantCommission = validSessions.reduce(
+      (total, session) =>
+        total + session.activeTables * session.tablePrice * (session.commissionPercent / 100),
+      0,
+    );
+    const prizes = validSessions.reduce((total, session) => total + session.prizeAmount, 0);
+    const hosterLiveRevenue = Math.max(0, grossRevenue - restaurantCommission - prizes);
+    const ticketAverage =
+      validSessions.length > 0
+        ? Math.round(grossRevenue / validSessions.reduce((total, session) => total + session.activeTables, 0))
+        : 0;
+
+    return {
+      validSessions,
+      grossRevenue,
+      restaurantCommission,
+      prizes,
+      hosterLiveRevenue,
+      ticketAverage,
+    };
+  }, [sessions]);
+
+  const dashboardKpis =
+    sessions.length === 0
+      ? mockDashboardKpis
+      : [
+          {
+            label: "Ingreso bruto",
+            value: formatCurrency(sessionMetrics.grossRevenue),
+            note: "Sesiones persistentes",
+          },
+          {
+            label: "Comision restaurantes",
+            value: formatCurrency(sessionMetrics.restaurantCommission),
+            note: "Calculada por sesion",
+          },
+          {
+            label: "Utilidad Hoster Live",
+            value: formatCurrency(sessionMetrics.hosterLiveRevenue),
+            note: "Revenue persistente",
+          },
+          {
+            label: "Premios entregados",
+            value: formatCurrency(sessionMetrics.prizes),
+            note: "Premios registrados",
+          },
+          {
+            label: "Jugadas activas",
+            value: String(sessions.filter((session) => session.status === "active").length),
+            note: "Sesiones abiertas",
+          },
+          {
+            label: "Ticket promedio",
+            value: formatCurrency(sessionMetrics.ticketAverage),
+            note: "Por tabla registrada",
+          },
+        ];
+
+  const restaurantRanking =
+    sessions.length === 0
+      ? mockRestaurantRanking
+      : Array.from(
+          sessions.reduce((map, session) => {
+            const current = map.get(session.restaurantId) ?? {
+              name: session.restaurantName,
+              games: 0,
+              grossRevenue: 0,
+              profit: 0,
+              status: "finalized",
+            };
+            const grossRevenue = session.activeTables * session.tablePrice;
+            const restaurantCommission = grossRevenue * (session.commissionPercent / 100);
+            const profit = Math.max(0, grossRevenue - restaurantCommission - session.prizeAmount);
+
+            map.set(session.restaurantId, {
+              ...current,
+              games: current.games + 1,
+              grossRevenue: current.grossRevenue + grossRevenue,
+              profit: current.profit + profit,
+              status: session.status === "active" ? "active" : current.status,
+            });
+
+            return map;
+          }, new Map<string, { name: string; games: number; grossRevenue: number; profit: number; status: string }>()),
+        )
+          .map(([, value]) => value)
+          .sort((left, right) => right.grossRevenue - left.grossRevenue);
+
+  const recentGameActivity =
+    sessions.length === 0
+      ? mockRecentGameActivity
+      : sessions.slice(0, 5).map((session) => ({
+          restaurant: session.restaurantName,
+          mode: session.mode,
+          prize: session.prizeAmount,
+          time: new Date(session.startedAt).toLocaleTimeString("es-MX", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        }));
+
+  const weeklyMetrics =
+    sessions.length === 0
+      ? mockWeeklyMetrics
+      : Object.values(
+          sessions.reduce(
+            (map, session) => {
+              const day = new Date(session.startedAt).toLocaleDateString("es-MX", {
+                day: "2-digit",
+                month: "2-digit",
+              });
+              const current = map[day] ?? { day, revenue: 0, games: 0 };
+              current.revenue += session.activeTables * session.tablePrice;
+              current.games += 1;
+              map[day] = current;
+              return map;
+            },
+            {} as Record<string, { day: string; revenue: number; games: number }>,
+          ),
+        );
+
+  const maxRevenue = Math.max(1, ...weeklyMetrics.map((metric) => metric.revenue));
+  const maxGames = Math.max(1, ...weeklyMetrics.map((metric) => metric.games));
 
   return (
     <Layout title="Dashboard Ejecutivo" eyebrow="HOSTER LIVE">

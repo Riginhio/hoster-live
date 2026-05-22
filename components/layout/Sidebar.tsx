@@ -1,28 +1,42 @@
+"use client";
+
 import Link from "next/link";
 import {
   BarChart3,
   Clapperboard,
+  History,
   LayoutDashboard,
   MonitorPlay,
+  Radio,
   Store,
   Table2,
   TrendingUp,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { getSupabaseConfigStatus } from "@/lib/supabase/client";
+import { useAuth } from "@/components/auth/AuthProvider";
+import type { UserRole } from "@/lib/auth/mockUsers";
 
 const links = [
-  { href: "/master", label: "Master", icon: LayoutDashboard },
-  { href: "/master/dashboard", label: "Dashboard", icon: TrendingUp },
-  { href: "/master/restaurantes", label: "Restaurantes", icon: Store },
-  { href: "/master/cortes", label: "Cortes", icon: BarChart3 },
-  { href: "/gerente", label: "Gerente", icon: Clapperboard },
-  { href: "/tv/rancho-viejo", label: "Pantalla TV", icon: MonitorPlay },
-  { href: "/admin/tablas", label: "Tablas", icon: Table2 },
+  { href: "/master", label: "Master", icon: LayoutDashboard, roles: ["master"] },
+  { href: "/master/dashboard", label: "Dashboard", icon: TrendingUp, roles: ["master"] },
+  { href: "/master/jugadas", label: "Jugadas", icon: History, roles: ["master"] },
+  { href: "/master/lotes", label: "Lotes", icon: Table2, roles: ["master"] },
+  { href: "/master/restaurantes", label: "Restaurantes", icon: Store, roles: ["master"] },
+  { href: "/master/cortes", label: "Cortes", icon: BarChart3, roles: ["master"] },
+  { href: "/gerente", label: "Gerente", icon: Clapperboard, roles: ["gerente"] },
+  { href: "/gerente/jugada-activa", label: "Jugada activa", icon: Radio, roles: ["gerente"] },
+  { href: "/gerente/tablas", label: "Tablas", icon: Table2, roles: ["gerente"] },
+  { href: "/tv/rancho-viejo", label: "Pantalla TV", icon: MonitorPlay, roles: ["tv"] },
+  { href: "/admin/tablas", label: "Tablas", icon: Table2, roles: ["master"] },
 ];
 
 export function Sidebar() {
   const supabaseStatus = getSupabaseConfigStatus();
+  const { currentUser } = useAuth();
+  const visibleLinks = links.filter((item) =>
+    currentUser ? item.roles.includes(currentUser.role as UserRole) : false,
+  );
 
   return (
     <aside className="hidden w-72 shrink-0 border-r border-bone/10 bg-obsidian/70 p-4 backdrop-blur lg:block">
@@ -46,7 +60,7 @@ export function Sidebar() {
         {supabaseStatus.connected ? "Supabase conectado" : "Modo local"}
       </div>
       <nav className="space-y-1">
-        {links.map((item) => (
+        {visibleLinks.map((item) => (
           <Link
             key={item.href}
             href={item.href}

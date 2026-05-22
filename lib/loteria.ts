@@ -1,7 +1,11 @@
+import { cardsCatalog } from "@/lib/cards/catalog";
+
 export type LoteriaCard = {
   id: string;
   number: number;
+  slug: string;
   name: string;
+  image: string;
 };
 
 export type LoteriaBoard = {
@@ -23,62 +27,13 @@ export type WinnerCheck = {
   winningCards: LoteriaCard[];
 };
 
-export const loteriaCards: LoteriaCard[] = [
-  { id: "el-gallo", number: 1, name: "El Gallo" },
-  { id: "el-diablito", number: 2, name: "El Diablito" },
-  { id: "la-dama", number: 3, name: "La Dama" },
-  { id: "el-catrin", number: 4, name: "El Catrin" },
-  { id: "el-paraguas", number: 5, name: "El Paraguas" },
-  { id: "la-sirena", number: 6, name: "La Sirena" },
-  { id: "la-escalera", number: 7, name: "La Escalera" },
-  { id: "la-botella", number: 8, name: "La Botella" },
-  { id: "el-barril", number: 9, name: "El Barril" },
-  { id: "el-arbol", number: 10, name: "El Arbol" },
-  { id: "el-melon", number: 11, name: "El Melon" },
-  { id: "el-valiente", number: 12, name: "El Valiente" },
-  { id: "el-gorrito", number: 13, name: "El Gorrito" },
-  { id: "la-muerte", number: 14, name: "La Muerte" },
-  { id: "la-pera", number: 15, name: "La Pera" },
-  { id: "la-bandera", number: 16, name: "La Bandera" },
-  { id: "el-bandolon", number: 17, name: "El Bandolon" },
-  { id: "el-violoncello", number: 18, name: "El Violoncello" },
-  { id: "la-garza", number: 19, name: "La Garza" },
-  { id: "el-pajaro", number: 20, name: "El Pajaro" },
-  { id: "la-mano", number: 21, name: "La Mano" },
-  { id: "la-bota", number: 22, name: "La Bota" },
-  { id: "la-luna", number: 23, name: "La Luna" },
-  { id: "el-cotorro", number: 24, name: "El Cotorro" },
-  { id: "el-borracho", number: 25, name: "El Borracho" },
-  { id: "el-negrito", number: 26, name: "El Negrito" },
-  { id: "el-corazon", number: 27, name: "El Corazon" },
-  { id: "la-sandia", number: 28, name: "La Sandia" },
-  { id: "el-tambor", number: 29, name: "El Tambor" },
-  { id: "el-camaron", number: 30, name: "El Camaron" },
-  { id: "las-jaras", number: 31, name: "Las Jaras" },
-  { id: "el-musico", number: 32, name: "El Musico" },
-  { id: "la-arana", number: 33, name: "La Arana" },
-  { id: "el-soldado", number: 34, name: "El Soldado" },
-  { id: "la-estrella", number: 35, name: "La Estrella" },
-  { id: "el-cazo", number: 36, name: "El Cazo" },
-  { id: "el-mundo", number: 37, name: "El Mundo" },
-  { id: "el-apache", number: 38, name: "El Apache" },
-  { id: "el-nopal", number: 39, name: "El Nopal" },
-  { id: "el-alacran", number: 40, name: "El Alacran" },
-  { id: "la-rosa", number: 41, name: "La Rosa" },
-  { id: "la-calavera", number: 42, name: "La Calavera" },
-  { id: "la-campana", number: 43, name: "La Campana" },
-  { id: "el-cantarito", number: 44, name: "El Cantarito" },
-  { id: "el-venado", number: 45, name: "El Venado" },
-  { id: "el-sol", number: 46, name: "El Sol" },
-  { id: "la-corona", number: 47, name: "La Corona" },
-  { id: "la-chalupa", number: 48, name: "La Chalupa" },
-  { id: "el-pino", number: 49, name: "El Pino" },
-  { id: "el-pescado", number: 50, name: "El Pescado" },
-  { id: "la-palma", number: 51, name: "La Palma" },
-  { id: "la-maceta", number: 52, name: "La Maceta" },
-  { id: "el-arpa", number: 53, name: "El Arpa" },
-  { id: "la-rana", number: 54, name: "La Rana" },
-];
+export const loteriaCards: LoteriaCard[] = cardsCatalog.map((card) => ({
+  id: card.slug,
+  number: card.id,
+  slug: card.slug,
+  name: card.name,
+  image: card.image,
+}));
 
 const winPatterns: Record<WinMode, WinningPosition[]> = {
   four_corners: [

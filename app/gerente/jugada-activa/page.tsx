@@ -1,0 +1,484 @@
+"use client";
+
+import Image from "next/image";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  BadgeCheck,
+  CircleDollarSign,
+  Clock3,
+  Pause,
+  Play,
+  Power,
+  Radio,
+  ScanSearch,
+  SkipForward,
+  Trophy,
+  type LucideIcon,
+} from "lucide-react";
+import { Layout } from "@/components/layout/Layout";
+import { Button } from "@/components/ui/Button";
+import { ButtonLink } from "@/components/ui/ButtonLink";
+import { Card } from "@/components/ui/Card";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { BrandMark } from "@/components/brand/BrandMark";
+import { checkWinner, type LoteriaBoard, type LoteriaCard, type WinMode } from "@/lib/loteria";
+import {
+  closeSession,
+  getActiveSession,
+  getSessionById,
+  getSessionDeck,
+  hydrateSessionCards,
+  updateSession,
+  type Session,
+} from "@/lib/sessions/sessionStorage";
+import {
+  getActiveBoardBatch,
+  getBoardBatches,
+  toLoteriaBoards,
+  type BoardBatch,
+} from "@/lib/boards/boardBatchStorage";
+
+const modeLabels: Record<WinMode, string> = {
+  four_corners: "4 esquinas",
+  x_shape: "Figura X",
+  center_four: "Centro 4",
+};
+
+const speedOptions = [3000, 5000, 8000];
+
+type WinnerState = {
+  folio: string;
+  cards: LoteriaCard[];
+};
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function getBatchForSession(session: Session) {
+  if (session.batchId) {
+    return getBoardBatches().find((batch) => batch.id === session.batchId) ?? null;
+  }
+
+  return getActiveBoardBatch(session.restaurantId) ?? null;
+}
+
+function getWinnerFromSession(session: Session | null): WinnerState | null {
+  if (!session?.winnerFolio) {
+    return null;
+  }
+
+  return {
+    folio: session.winnerFolio,
+    cards: hydrateSessionCards(session.winnerCards),
+  };
+}
+
+export default function JugadaActivaPage() {
+  const { currentUser } = useAuth();
+  const [session, setSession] = useState<Session | null>(null);
+  const [activeBatch, setActiveBatch] = useState<BoardBatch | null>(null);
+  const [calledCards, setCalledCards] = useState<LoteriaCard[]>([]);
+  const [winner, setWinner] = useState<WinnerState | null>(null);
+  const [isAutoplay, setIsAutoplay] = useState(false);
+  const [intervalMs, setIntervalMs] = useState(5000);
+
+  const restaurantId = currentUser?.restaurantId;
+
+  const activeBoards = useMemo<LoteriaBoard[]>(() => {
+    if (!activeBatch || !session) {
+      return [];
+    }
+
+    return toLoteriaBoards(activeBatch.boards).slice(0, session.activeTables);
+  }, [activeBatch, session]);
+
+  const deck = useMemo(() => (session ? getSessionDeck(session.id) : []), [session]);
+  const currentCard = calledCards[calledCards.length - 1] ?? null;
+  const nextCard = session ? deck[session.calledCards.length] ?? null : null;
+  const progressPercent = Math.round((calledCards.length / 54) * 100);
+  const statusLabel = session?.status === "active" ? "activa" : "finalizada";
+
+  const syncActiveSession = useCallback(() => {
+    if (!restaurantId) {
+      setSession(null);
+      setActiveBatch(null);
+      setCalledCards([]);
+      setWinner(null);
+      setIsAutoplay(false);
+      return;
+    }
+
+    const activeSession = session?.id ? getSessionById(session.id) : getActiveSession(restaurantId);
+    const normalizedSession =
+      activeSession?.status === "active" ? activeSession : getActiveSession(restaurantId) ?? null;
+
+    setSession(normalizedSession);
+    setActiveBatch(normalizedSession ? getBatchForSession(normalizedSession) : null);
+    setCalledCards(normalizedSession ? hydrateSessionCards(normalizedSession.calledCards) : []);
+    setWinner(getWinnerFromSession(normalizedSession));
+
+    if (!normalizedSession || normalizedSession.winnerFolio) {
+      setIsAutoplay(false);
+    }
+
+  }, [restaurantId, session?.id]);
+
+  useEffect(() => {
+    syncActiveSession();
+    const intervalId = globalThis.setInterval(syncActiveSession, 900);
+    return () => globalThis.clearInterval(intervalId);
+  }, [syncActiveSession]);
+
+  const advanceSession = useCallback((sessionId: string) => {
+    const latestSession = getSessionById(sessionId);
+
+    if (!latestSession || latestSession.status !== "active" || latestSession.winnerFolio) {
+      setIsAutoplay(false);
+      return;
+    }
+
+    const latestDeck = getSessionDeck(latestSession.id);
+    const nextSessionCard = latestDeck[latestSession.calledCards.length];
+    const sessionBatch = getBatchForSession(latestSession);
+    const sessionBoards = sessionBatch
+      ? toLoteriaBoards(sessionBatch.boards).slice(0, latestSession.activeTables)
+      : [];
+
+    if (!nextSessionCard) {
+      setIsAutoplay(false);
+      return;
+    }
+
+    const nextCalledCardIds = [...latestSession.calledCards, nextSessionCard.id];
+    const winningBoard = sessionBoards
+      .map((board) => ({
+        board,
+        result: checkWinner(board, nextCalledCardIds, latestSession.mode),
+      }))
+      .find(({ result }) => result.hasWon);
+    const updates: Partial<Omit<Session, "id">> = {
+      calledCards: nextCalledCardIds,
+    };
+
+    if (winningBoard) {
+      updates.winnerFolio = winningBoard.board.folio;
+      updates.winnerCards = winningBoard.result.winningCards.map((card) => card.id);
+    }
+
+    const updatedSession = updateSession(latestSession.id, updates) ?? latestSession;
+    setSession(updatedSession);
+    setActiveBatch(sessionBatch);
+    setCalledCards(hydrateSessionCards(updatedSession.calledCards));
+    setWinner(getWinnerFromSession(updatedSession));
+
+    if (winningBoard) {
+      setIsAutoplay(false);
+    }
+  }, []);
+
+  const callNextCard = useCallback(() => {
+    if (!session?.id || winner || !nextCard) {
+      return;
+    }
+
+    advanceSession(session.id);
+  }, [advanceSession, nextCard, session?.id, winner]);
+
+  useEffect(() => {
+    if (!isAutoplay || !session?.id || winner) {
+      return;
+    }
+
+    const intervalId = globalThis.setInterval(() => advanceSession(session.id), intervalMs);
+    return () => globalThis.clearInterval(intervalId);
+  }, [advanceSession, intervalMs, isAutoplay, session?.id, winner]);
+
+  function closeActiveSession() {
+    if (!session) {
+      return;
+    }
+
+    closeSession(session.id, {
+      calledCards: session.calledCards,
+      winnerFolio: session.winnerFolio,
+      winnerCards: session.winnerCards,
+    });
+    setIsAutoplay(false);
+    setSession(null);
+    setActiveBatch(null);
+    setCalledCards([]);
+    setWinner(null);
+  }
+
+  if (!session) {
+    return (
+      <Layout title="Jugada activa" eyebrow="HOSTER LIVE">
+        <Card accent className="mx-auto max-w-3xl text-center">
+          <div className="mx-auto grid h-16 w-16 place-items-center rounded-lg border border-mezcal/35 bg-mezcal/10 text-mezcal shadow-glow">
+            <Radio size={30} />
+          </div>
+          <h2 className="mt-5 font-display text-5xl text-bone">No hay jugada activa</h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-bone/60">
+            Crea una jugada para el restaurante del gerente y esta pantalla tomara el control
+            operativo en vivo.
+          </p>
+          <ButtonLink href="/gerente/nueva-jugada" className="mt-6">
+            Ir a nueva jugada
+          </ButtonLink>
+        </Card>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout title="Jugada activa" eyebrow="HOSTER LIVE">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <Card accent className="bg-charcoal/90">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <BrandMark className="h-12 w-12" textClassName="text-base" />
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.26em] text-mezcal">
+                  Operacion en vivo
+                </p>
+                <h2 className="font-display text-4xl text-bone">{session.restaurantName}</h2>
+              </div>
+            </div>
+            <span
+              className={`w-fit rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.18em] ${
+                session.status === "active"
+                  ? "border-agave/35 bg-agave/12 text-agave"
+                  : "border-bone/15 bg-bone/[0.04] text-bone/55"
+              }`}
+            >
+              {statusLabel}
+            </span>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <InfoTile label="Session ID" value={session.id.slice(0, 12)} />
+            <InfoTile label="Lote activo" value={activeBatch?.name ?? "Sin lote"} />
+            <InfoTile label="Modalidad" value={modeLabels[session.mode]} />
+            <InfoTile label="Tablas en juego" value={String(session.activeTables)} />
+            <InfoTile label="Costo tabla" value={formatCurrency(session.tablePrice)} />
+            <InfoTile label="Premio" value={formatCurrency(session.prizeAmount)} />
+            <InfoTile label="Cartas cantadas" value={`${calledCards.length}/54`} />
+            <InfoTile label="Estado" value={statusLabel} />
+          </div>
+        </Card>
+
+        <Card className="bg-bone/[0.045]">
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-bone/45">
+            Progreso operativo
+          </p>
+          <div className="mt-4 space-y-4">
+            <ProgressRow icon={Clock3} label="Cartas cantadas" value={`${calledCards.length}/54`} />
+            <ProgressRow icon={ScanSearch} label="Tablas revisadas" value={String(activeBoards.length)} />
+            <ProgressRow icon={Trophy} label="Folio ganador" value={winner?.folio ?? "Pendiente"} />
+            <div>
+              <div className="h-2 overflow-hidden rounded-full bg-bone/10">
+                <div
+                  className="h-full rounded-full bg-agave transition-all"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-bone/45">{progressPercent}% del mazo operativo</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {winner ? (
+        <Card className="mt-4 border-mezcal/45 bg-[linear-gradient(90deg,rgba(217,164,65,0.22),rgba(31,161,135,0.16),rgba(217,164,65,0.12))] shadow-glow">
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.3em] text-mezcal">
+                TABLA GANADORA
+              </p>
+              <h3 className="mt-2 font-display text-5xl text-bone">{winner.folio}</h3>
+              <p className="mt-2 text-sm font-semibold text-bone/65">
+                Premio {formatCurrency(session.prizeAmount)}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {winner.cards.map((card) => (
+                  <MiniCard key={card.id} card={card} />
+                ))}
+              </div>
+            </div>
+            <Button onClick={closeActiveSession}>
+              <BadgeCheck size={18} />
+              Cerrar jugada
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">
+        <Card className="bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.18),rgba(20,17,15,0.94)_44%,rgba(8,7,6,0.98)_100%)]">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button onClick={callNextCard} disabled={!nextCard || Boolean(winner)}>
+              <SkipForward size={18} />
+              Cantar siguiente carta
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setIsAutoplay(true)}
+              disabled={!nextCard || Boolean(winner) || isAutoplay}
+            >
+              <Play size={18} />
+              Iniciar autoplay
+            </Button>
+            <Button variant="secondary" onClick={() => setIsAutoplay(false)} disabled={!isAutoplay}>
+              <Pause size={18} />
+              Pausar autoplay
+            </Button>
+            <Button variant="danger" onClick={closeActiveSession}>
+              <Power size={18} />
+              Finalizar jugada
+            </Button>
+          </div>
+
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {speedOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setIntervalMs(option)}
+                className={`h-9 rounded-lg border px-4 text-xs font-black transition ${
+                  intervalMs === option
+                    ? "border-agave bg-agave text-obsidian"
+                    : "border-bone/10 bg-bone/[0.04] text-bone/70 hover:bg-bone/10"
+                }`}
+              >
+                {option / 1000}s
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-6 grid place-items-center">
+            <div className="mb-4 grid h-16 w-16 place-items-center rounded-full border border-mezcal/40 bg-mezcal/15 text-2xl font-black text-mezcal">
+              {currentCard ? String(currentCard.number).padStart(2, "0") : "--"}
+            </div>
+            <div className="relative aspect-[0.63] w-full max-w-[390px] overflow-hidden rounded-lg border-2 border-mezcal bg-bone shadow-glow">
+              {currentCard ? (
+                <Image
+                  src={currentCard.image}
+                  alt={currentCard.name}
+                  width={720}
+                  height={1141}
+                  className="h-full w-full object-contain"
+                  priority
+                />
+              ) : (
+                <div className="grid h-full place-items-center bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-6 text-obsidian">
+                  <BrandMark
+                    className="h-36 w-36 border-obsidian/65 shadow-none"
+                    textClassName="text-[4rem] leading-none"
+                  />
+                </div>
+              )}
+            </div>
+            <p className="mt-4 text-sm font-black uppercase tracking-[0.28em] text-bone/50">
+              {currentCard?.name ?? "Carta actual"}
+            </p>
+          </div>
+        </Card>
+
+        <Card className="bg-charcoal/88">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-mezcal">
+                Historial
+              </p>
+              <h3 className="font-display text-3xl text-bone">{calledCards.length}/54</h3>
+            </div>
+            <CircleDollarSign className="text-agave" size={28} />
+          </div>
+          <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
+            {[...calledCards].reverse().map((card, index) => (
+              <div
+                key={`${card.id}-${calledCards.length - index}`}
+                className={`grid grid-cols-[3rem_1fr_auto] items-center gap-3 rounded-lg border p-2 ${
+                  index === 0
+                    ? "border-mezcal bg-mezcal/12 shadow-glow"
+                    : "border-bone/10 bg-bone/[0.04]"
+                }`}
+              >
+                <Image
+                  src={card.image}
+                  alt={card.name}
+                  width={72}
+                  height={114}
+                  className="h-12 w-9 rounded object-cover"
+                />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-bone">{card.name}</p>
+                  <p className="text-xs text-bone/45">
+                    Carta {String(card.number).padStart(2, "0")}
+                  </p>
+                </div>
+                <span className="rounded-full bg-obsidian/70 px-2 py-1 text-xs font-black text-mezcal">
+                  #{calledCards.length - index}
+                </span>
+              </div>
+            ))}
+            {calledCards.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-bone/15 p-5 text-center text-sm text-bone/55">
+                Aun no se han cantado cartas.
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+    </Layout>
+  );
+}
+
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-bone/10 bg-obsidian/45 p-3">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/40">{label}</p>
+      <p className="mt-2 truncate text-sm font-black text-bone">{value}</p>
+    </div>
+  );
+}
+
+function ProgressRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-bone/10 bg-obsidian/45 p-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <Icon className="shrink-0 text-mezcal" size={18} />
+        <p className="truncate text-sm text-bone/62">{label}</p>
+      </div>
+      <p className="shrink-0 text-sm font-black text-bone">{value}</p>
+    </div>
+  );
+}
+
+function MiniCard({ card }: { card: LoteriaCard }) {
+  return (
+    <div className="w-20 rounded-lg border border-bone/10 bg-obsidian/55 p-1.5 text-center">
+      <Image
+        src={card.image}
+        alt={card.name}
+        width={96}
+        height={152}
+        className="mx-auto h-20 w-auto rounded object-contain"
+      />
+      <p className="mt-1 truncate text-[10px] font-semibold text-bone/70">{card.name}</p>
+    </div>
+  );
+}
