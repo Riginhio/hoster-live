@@ -20,6 +20,13 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function statusLabel(status: string) {
   if (status === "active") {
     return "Activo";
@@ -97,6 +104,14 @@ export default function MasterDashboardPage() {
       validSessions.length > 0
         ? Math.round(grossRevenue / validSessions.reduce((total, session) => total + session.activeTables, 0))
         : 0;
+    const sessionsWithDuration = validSessions.filter((session) => session.durationSeconds > 0);
+    const averageDuration =
+      sessionsWithDuration.length > 0
+        ? Math.round(
+            sessionsWithDuration.reduce((total, session) => total + session.durationSeconds, 0) /
+              sessionsWithDuration.length,
+          )
+        : 0;
 
     return {
       validSessions,
@@ -107,6 +122,7 @@ export default function MasterDashboardPage() {
       prizes,
       hosterLiveRevenue,
       ticketAverage,
+      averageDuration,
     };
   }, [sessions]);
 
@@ -148,6 +164,11 @@ export default function MasterDashboardPage() {
             label: "Ticket promedio",
             value: formatCurrency(sessionMetrics.ticketAverage),
             note: "Por tabla registrada",
+          },
+          {
+            label: "Duracion promedio",
+            value: formatDuration(sessionMetrics.averageDuration),
+            note: "Tiempo real en playing",
           },
         ];
 

@@ -34,6 +34,8 @@ export type Session = {
   preStartCountdownSeconds: number;
   preStartStartedAt?: string;
   autoplayStartedAt?: string;
+  playStartedAt?: string;
+  playEndedAt?: string;
   activePromotions?: QrCampaign[];
   status: SessionStatus;
   durationSeconds: number;
@@ -62,6 +64,10 @@ function calculateDurationSeconds(startedAt: string, endedAt = new Date().toISOS
   }
 
   return Math.max(0, Math.round((endedTime - startedTime) / 1000));
+}
+
+function calculatePlayDurationSeconds(session: Partial<Session>, endedAt = new Date().toISOString()) {
+  return session.playStartedAt ? calculateDurationSeconds(session.playStartedAt, endedAt) : 0;
 }
 
 function hashSeed(value: string) {
@@ -164,6 +170,8 @@ function normalizeSession(session: Partial<Session>): Session {
     preStartCountdownSeconds: session.preStartCountdownSeconds ?? 60,
     preStartStartedAt: session.preStartStartedAt,
     autoplayStartedAt: session.autoplayStartedAt,
+    playStartedAt: session.playStartedAt,
+    playEndedAt: session.playEndedAt,
     activePromotions: session.activePromotions ?? [],
     status: session.status ?? "active",
     durationSeconds: session.durationSeconds ?? 0,
@@ -186,7 +194,8 @@ function finalizeSession(session: Session, endedAt: string): Session {
     status: "finalized",
     autoplayStatus: "finished",
     lastUpdatedAt: endedAt,
-    durationSeconds: calculateDurationSeconds(session.startedAt, endedAt),
+    playEndedAt: session.playEndedAt ?? endedAt,
+    durationSeconds: session.durationSeconds || calculatePlayDurationSeconds(session, endedAt),
   });
 }
 
@@ -218,6 +227,8 @@ export function createSession(
     | "preStartCountdownSeconds"
     | "preStartStartedAt"
     | "autoplayStartedAt"
+    | "playStartedAt"
+    | "playEndedAt"
     | "activePromotions"
     | "status"
     | "durationSeconds"
@@ -245,6 +256,8 @@ export function createSession(
         | "preStartCountdownSeconds"
         | "preStartStartedAt"
         | "autoplayStartedAt"
+        | "playStartedAt"
+        | "playEndedAt"
         | "activePromotions"
         | "status"
         | "durationSeconds"
@@ -289,6 +302,8 @@ export function createSession(
     preStartCountdownSeconds: session.preStartCountdownSeconds ?? 60,
     preStartStartedAt: session.preStartStartedAt,
     autoplayStartedAt: session.autoplayStartedAt,
+    playStartedAt: session.playStartedAt,
+    playEndedAt: session.playEndedAt,
     activePromotions: session.activePromotions ?? [],
     status: "active",
     durationSeconds: session.durationSeconds ?? 0,
@@ -306,11 +321,37 @@ export function createSession(
 
 export function updateSession(sessionId: string, updates: Partial<Omit<Session, "id">>) {
   const sessions = getSessions();
-  const updatedSessions = sessions.map((session) =>
-    session.id === sessionId
-      ? normalizeSession({ ...session, ...updates, lastUpdatedAt: new Date().toISOString() })
-      : session,
-  );
+  const now = new Date().toISOString();
+  const updatedSessions = sessions.map((session) => {
+    if (session.id !== sessionId) {
+      return session;
+    }
+
+    const nextSession: Partial<Session> = {
+      ...session,
+      ...updates,
+      lastUpdatedAt: now,
+    };
+
+    if (updates.autoplayStatus === "playing" && !session.playStartedAt) {
+      nextSession.playStartedAt = now;
+    }
+
+    if (
+      (updates.autoplayStatus === "finished" || updates.status === "finalized" || updates.winnerFolio) &&
+      session.playStartedAt &&
+      !session.playEndedAt
+    ) {
+      const playEndedAt = updates.playEndedAt ?? updates.endedAt ?? now;
+      nextSession.playEndedAt = playEndedAt;
+      nextSession.durationSeconds = calculatePlayDurationSeconds(
+        { ...session, ...nextSession },
+        playEndedAt,
+      );
+    }
+
+    return normalizeSession(nextSession);
+  });
 
   saveSessions(updatedSessions);
   return updatedSessions.find((session) => session.id === sessionId);
@@ -330,7 +371,11 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
     endedAt,
     status: "finalized",
     autoplayStatus: "finished",
-    durationSeconds: calculateDurationSeconds(session.startedAt, endedAt),
+    playEndedAt: updates.playEndedAt ?? session.playEndedAt ?? endedAt,
+    durationSeconds:
+      (updates.durationSeconds ??
+      session.durationSeconds) ||
+      calculatePlayDurationSeconds(session, endedAt),
   });
 }
 

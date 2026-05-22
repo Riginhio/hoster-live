@@ -14,6 +14,13 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function getGrossRevenue(session: Session) {
   return session.grossRevenue ?? session.activeTables * session.tablePrice;
 }
@@ -51,6 +58,7 @@ export default function CortesPage() {
             summary.commissionRestaurant + getCommissionRestaurant(session),
           commissionNet: summary.commissionNet + getCommissionNet(session),
           prizes: summary.prizes + session.prizeAmount,
+          durationSeconds: summary.durationSeconds + (session.durationSeconds ?? 0),
         }),
         {
           grossRevenue: 0,
@@ -58,6 +66,7 @@ export default function CortesPage() {
           commissionRestaurant: 0,
           commissionNet: 0,
           prizes: 0,
+          durationSeconds: 0,
         },
       ),
     [sessions],
@@ -75,6 +84,7 @@ export default function CortesPage() {
             commissionRestaurant: 0,
             commissionNet: 0,
             prizes: 0,
+            durationSeconds: 0,
           };
 
           map.set(session.restaurantId, {
@@ -86,10 +96,11 @@ export default function CortesPage() {
               current.commissionRestaurant + getCommissionRestaurant(session),
             commissionNet: current.commissionNet + getCommissionNet(session),
             prizes: current.prizes + session.prizeAmount,
+            durationSeconds: current.durationSeconds + (session.durationSeconds ?? 0),
           });
 
           return map;
-        }, new Map<string, { name: string; games: number; grossRevenue: number; commissionHL: number; commissionRestaurant: number; commissionNet: number; prizes: number }>()),
+        }, new Map<string, { name: string; games: number; grossRevenue: number; commissionHL: number; commissionRestaurant: number; commissionNet: number; prizes: number; durationSeconds: number }>()),
       ).map(([, value]) => value),
     [sessions],
   );
@@ -106,6 +117,7 @@ export default function CortesPage() {
         />
         <StatCard label="Comision neta" value={formatCurrency(totals.commissionNet)} note="HL + venue" />
         <StatCard label="Premios" value={formatCurrency(totals.prizes)} note="Entregados" />
+        <StatCard label="Duracion" value={formatDuration(totals.durationSeconds)} note="Tiempo jugado" />
       </div>
       <Card className="mt-6 overflow-hidden p-0">
         <div className="border-b border-bone/10 px-5 py-4">
@@ -122,6 +134,7 @@ export default function CortesPage() {
                 <th className="px-5 py-4">Comision restaurante</th>
                 <th className="px-5 py-4">Comision neta</th>
                 <th className="px-5 py-4">Premios</th>
+                <th className="px-5 py-4">Duracion</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-bone/10">
@@ -136,6 +149,9 @@ export default function CortesPage() {
                   </td>
                   <td className="px-5 py-4 text-mezcal">{formatCurrency(restaurant.commissionNet)}</td>
                   <td className="px-5 py-4 text-bone/62">{formatCurrency(restaurant.prizes)}</td>
+                  <td className="px-5 py-4 text-bone/62">
+                    {formatDuration(restaurant.durationSeconds)}
+                  </td>
                 </tr>
               ))}
             </tbody>

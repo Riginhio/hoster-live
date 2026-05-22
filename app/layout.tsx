@@ -3,7 +3,7 @@ import { AuthProvider } from "@/components/auth/AuthProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "HOSTER LIVE",
+  title: "Hoster Live",
   description: "Hospitality Gaming Platform para operacion premium en venues.",
 };
 

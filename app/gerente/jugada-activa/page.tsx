@@ -14,6 +14,8 @@ import {
   ScanSearch,
   SkipForward,
   Trophy,
+  Volume2,
+  VolumeX,
   type LucideIcon,
 } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
@@ -38,6 +40,12 @@ import {
   toLoteriaBoards,
   type BoardBatch,
 } from "@/lib/boards/boardBatchStorage";
+import {
+  getStoredAudioEnabled,
+  playGameTone,
+  setStoredAudioEnabled,
+  unlockGameAudio,
+} from "@/lib/audio/gameAudio";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -77,6 +85,25 @@ function getCountdownRemainingSeconds(session: Session | null) {
   return Math.max(0, session.preStartCountdownSeconds - elapsedSeconds);
 }
 
+function formatDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getPlayElapsedSeconds(session: Session | null) {
+  if (!session?.playStartedAt) {
+    return session?.durationSeconds ?? 0;
+  }
+
+  if (session.playEndedAt) {
+    return session.durationSeconds;
+  }
+
+  return Math.max(0, Math.floor((Date.now() - new Date(session.playStartedAt).getTime()) / 1000));
+}
+
 function getBatchForSession(session: Session) {
   if (session.batchId) {
     return getBoardBatches().find((batch) => batch.id === session.batchId) ?? null;
@@ -105,6 +132,8 @@ export default function JugadaActivaPage() {
   const [intervalMs, setIntervalMs] = useState(5000);
   const [countdownSeconds, setCountdownSeconds] = useState(60);
   const [countdownRemaining, setCountdownRemaining] = useState(0);
+  const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
 
   const restaurantId = currentUser?.restaurantId;
 
@@ -162,6 +191,18 @@ export default function JugadaActivaPage() {
     return () => globalThis.clearInterval(intervalId);
   }, [session]);
 
+  useEffect(() => {
+    setAudioEnabled(getStoredAudioEnabled());
+  }, []);
+
+  useEffect(() => {
+    const updateElapsed = () => setPlayElapsedSeconds(getPlayElapsedSeconds(session));
+
+    updateElapsed();
+    const intervalId = globalThis.setInterval(updateElapsed, 1000);
+    return () => globalThis.clearInterval(intervalId);
+  }, [session]);
+
   const advanceSession = useCallback((sessionId: string) => {
     const latestSession = getSessionById(sessionId);
 
@@ -202,8 +243,9 @@ export default function JugadaActivaPage() {
     setActiveBatch(sessionBatch);
     setCalledCards(hydrateSessionCards(updatedSession.calledCards));
     setWinner(getWinnerFromSession(updatedSession));
+    playGameTone(winningBoard ? "winner" : "card", audioEnabled);
 
-  }, []);
+  }, [audioEnabled]);
 
   const callNextCard = useCallback(() => {
     if (!session?.id || winner || !nextCard) {
@@ -254,6 +296,16 @@ export default function JugadaActivaPage() {
     setActiveBatch(null);
     setCalledCards([]);
     setWinner(null);
+  }
+
+  async function enableAudio() {
+    const unlocked = await unlockGameAudio();
+    setAudioEnabled(unlocked);
+  }
+
+  function disableAudio() {
+    setStoredAudioEnabled(false);
+    setAudioEnabled(false);
   }
 
   function startCountdown() {
@@ -360,6 +412,7 @@ export default function JugadaActivaPage() {
             <InfoTile label="Premio" value={formatCurrency(session.prizeAmount)} />
             <InfoTile label="Cartas cantadas" value={`${calledCards.length}/54`} />
             <InfoTile label="Estado" value={autoplayStatus} />
+            <InfoTile label="Tiempo de jugada" value={formatDuration(playElapsedSeconds)} />
           </div>
         </Card>
 
@@ -489,6 +542,17 @@ export default function JugadaActivaPage() {
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">
         <Card className="bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.18),rgba(20,17,15,0.94)_44%,rgba(8,7,6,0.98)_100%)]">
           <div className="flex flex-wrap items-center justify-center gap-3">
+            {audioEnabled ? (
+              <Button variant="secondary" onClick={disableAudio}>
+                <Volume2 size={18} />
+                Sonido activo
+              </Button>
+            ) : (
+              <Button variant="secondary" onClick={enableAudio}>
+                <VolumeX size={18} />
+                Sonido inactivo
+              </Button>
+            )}
             <Button
               onClick={callNextCard}
               disabled={!nextCard || Boolean(winner) || autoplayStatus === "countdown"}

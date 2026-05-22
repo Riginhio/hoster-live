@@ -4,7 +4,8 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Megaphone } from "lucide-react";
+import { Megaphone, Volume2, VolumeX } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { getWinPattern, type LoteriaBoard, type LoteriaCard } from "@/lib/loteria";
 import type { WinMode } from "@/lib/loteria";
@@ -28,6 +29,12 @@ import {
   toLoteriaBoards,
 } from "@/lib/boards/boardBatchStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
+import {
+  getStoredAudioEnabled,
+  playGameTone,
+  setStoredAudioEnabled,
+  unlockGameAudio,
+} from "@/lib/audio/gameAudio";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -66,6 +73,25 @@ function formatCountdown(totalSeconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getPlayElapsedSeconds(session: Session | null) {
+  if (!session?.playStartedAt) {
+    return session?.durationSeconds ?? 0;
+  }
+
+  if (session.playEndedAt) {
+    return session.durationSeconds;
+  }
+
+  return Math.max(0, Math.floor((Date.now() - new Date(session.playStartedAt).getTime()) / 1000));
+}
+
 function getSessionSyncSignature(session: Session) {
   return [
     session.id,
@@ -84,9 +110,12 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [calledCards, setCalledCards] = useState<LoteriaCard[]>([]);
   const [winner, setWinner] = useState<WinnerState | null>(null);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [currentTime, setCurrentTime] = useState("");
   const [countdownRemaining, setCountdownRemaining] = useState(0);
+  const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const lastSyncSignatureRef = useRef("");
+  const previousCalledCountRef = useRef(0);
+  const previousWinnerFolioRef = useRef<string | undefined>(undefined);
 
   const restaurant = getRestaurantById(restaurantId);
   const restaurantPrimary = restaurant.primaryColor || restaurant.theme.primaryColor;
@@ -138,6 +167,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         const storedSession = activeRestaurantSession ?? currentStoredSession;
 
         if (storedSession) {
+          const previousSessionId = activeSession?.id;
           const syncSignature = getSessionSyncSignature(storedSession);
 
           if (lastSyncSignatureRef.current === syncSignature) {
@@ -145,7 +175,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           }
 
           lastSyncSignatureRef.current = syncSignature;
-          const sessionIdChanged = activeSession?.id && activeSession.id !== storedSession.id;
+          const sessionIdChanged = previousSessionId && previousSessionId !== storedSession.id;
           const sessionBatch = storedSession.batchId
             ? getBoardBatches().find((batch) => batch.id === storedSession.batchId)
             : getActiveBoardBatch(restaurantId);
@@ -157,6 +187,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             setCalledCards([]);
             setWinner(null);
             setCountdownRemaining(0);
+            previousCalledCountRef.current = 0;
+            previousWinnerFolioRef.current = undefined;
           }
 
           setBatchBoards(nextBoards);
@@ -171,6 +203,19 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             createdAt: storedSession.createdAt,
           });
           setCalledCards(isCountdownSession ? [] : nextCalledCards);
+
+          if (!isCountdownSession && !sessionIdChanged) {
+            if (storedSession.calledCards.length > previousCalledCountRef.current) {
+              playGameTone("card", audioEnabled);
+            }
+
+            if (storedSession.winnerFolio && storedSession.winnerFolio !== previousWinnerFolioRef.current) {
+              playGameTone("winner", audioEnabled);
+            }
+          }
+
+          previousCalledCountRef.current = isCountdownSession ? 0 : storedSession.calledCards.length;
+          previousWinnerFolioRef.current = storedSession.winnerFolio;
 
           if (
             !isCountdownSession &&
@@ -202,6 +247,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         setActiveSession(null);
         setWinner(null);
         setCalledCards([]);
+        previousCalledCountRef.current = 0;
+        previousWinnerFolioRef.current = undefined;
 
         const parsedConfig = parseStoredDemoConfig(
           localStorage.getItem(configStorageKey),
@@ -226,26 +273,19 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       globalThis.clearInterval(intervalId);
       window.removeEventListener("storage", syncSession);
     };
-  }, [activeSession?.id, activeSession?.lastUpdatedAt, restaurantId]);
+  }, [activeSession?.id, activeSession?.lastUpdatedAt, audioEnabled, restaurantId]);
 
   useEffect(() => {
-    if (!restaurant.showClock) {
-      return;
-    }
+    setAudioEnabled(getStoredAudioEnabled());
+  }, []);
 
-    const updateClock = () => {
-      setCurrentTime(
-        new Date().toLocaleTimeString("es-MX", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
-    };
+  useEffect(() => {
+    const updateElapsed = () => setPlayElapsedSeconds(getPlayElapsedSeconds(activeSession));
 
-    updateClock();
-    const intervalId = globalThis.setInterval(updateClock, 1000);
+    updateElapsed();
+    const intervalId = globalThis.setInterval(updateElapsed, 1000);
     return () => globalThis.clearInterval(intervalId);
-  }, [restaurant.showClock]);
+  }, [activeSession]);
 
   useEffect(() => {
     const updateCountdown = () => setCountdownRemaining(getCountdownRemainingSeconds(activeSession));
@@ -268,6 +308,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     }
   }, [activeSession, countdownRemaining]);
 
+  async function enableAudio() {
+    const unlocked = await unlockGameAudio();
+    setAudioEnabled(unlocked);
+  }
+
+  function disableAudio() {
+    setStoredAudioEnabled(false);
+    setAudioEnabled(false);
+  }
+
   if (visualStatus === "countdown") {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
@@ -279,6 +329,19 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           }}
         >
           <div className="w-full max-w-6xl">
+            <div className="mb-5 flex justify-end">
+              {audioEnabled ? (
+                <Button variant="secondary" onClick={disableAudio}>
+                  <Volume2 size={18} />
+                  Sonido activo
+                </Button>
+              ) : (
+                <Button onClick={enableAudio}>
+                  <VolumeX size={18} />
+                  Activar sonido
+                </Button>
+              )}
+            </div>
             <div className="mx-auto mb-8 flex w-fit items-center gap-3 rounded-lg border border-bone/10 bg-obsidian/60 px-4 py-3">
               {restaurant.logoUrl ? (
                 <img
@@ -414,6 +477,19 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               ) : (
                 <p className="mt-5 text-xl font-semibold text-bone/62">{standbyCtaText}</p>
               )}
+              <div className="mt-6">
+                {audioEnabled ? (
+                  <Button variant="secondary" onClick={disableAudio}>
+                    <Volume2 size={18} />
+                    Sonido activo
+                  </Button>
+                ) : (
+                  <Button onClick={enableAudio}>
+                    <VolumeX size={18} />
+                    Activar sonido
+                  </Button>
+                )}
+              </div>
             </div>
 
             <div className="grid gap-4">
@@ -473,6 +549,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                         />
                       ))}
                     </div>
+                  ) : null}
+                  {activeSession.durationSeconds ? (
+                    <p className="mt-3 text-sm font-semibold text-bone/62">
+                      Ultima jugada: {formatDuration(activeSession.durationSeconds)}
+                    </p>
                   ) : null}
                 </div>
               ) : null}
@@ -560,10 +641,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 <h1 className="font-display text-3xl text-bone md:text-5xl">HOSTER LIVE</h1>
               </div>
             </div>
-            {restaurant.showClock ? (
+            {activeSession ? (
               <div className="rounded-lg border border-bone/10 bg-obsidian/55 px-4 py-3 text-right">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/45">Hora</p>
-                <p className="font-display text-3xl text-bone">{currentTime}</p>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/45">
+                  Tiempo de jugada
+                </p>
+                <p className="font-display text-3xl text-bone">
+                  {formatDuration(playElapsedSeconds)}
+                </p>
               </div>
             ) : null}
             <div className="grid grid-cols-4 gap-2 text-center">
@@ -641,8 +726,21 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               </div>
             </section>
           ) : (
-            <section className="flex min-h-[620px] flex-col items-center justify-center rounded-lg border border-mezcal/35 bg-[radial-gradient(circle_at_50%_20%,rgba(217,164,65,0.18),rgba(20,17,15,0.92)_48%,rgba(8,7,6,0.98)_100%)] p-5 text-center shadow-cantina">
-              <p className="mb-5 text-xs font-black uppercase tracking-[0.28em] text-mezcal">
+          <section className="flex min-h-[620px] flex-col items-center justify-center rounded-lg border border-mezcal/35 bg-[radial-gradient(circle_at_50%_20%,rgba(217,164,65,0.18),rgba(20,17,15,0.92)_48%,rgba(8,7,6,0.98)_100%)] p-5 text-center shadow-cantina">
+            <div className="mb-4">
+              {audioEnabled ? (
+                <Button variant="secondary" onClick={disableAudio}>
+                  <Volume2 size={18} />
+                  Sonido activo
+                </Button>
+              ) : (
+                <Button onClick={enableAudio}>
+                  <VolumeX size={18} />
+                  Activar sonido
+                </Button>
+              )}
+            </div>
+            <p className="mb-5 text-xs font-black uppercase tracking-[0.28em] text-mezcal">
                 {statusLabel}
               </p>
               <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-mezcal/40 bg-mezcal/15 text-lg font-black text-mezcal md:h-20 md:w-20 md:text-2xl">
