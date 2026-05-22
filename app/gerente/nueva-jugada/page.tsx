@@ -22,6 +22,7 @@ import { createSession } from "@/lib/sessions/sessionStorage";
 import { saveLastGameConfig } from "@/lib/sessions/lastGameConfigStorage";
 import { getActiveBoardBatch } from "@/lib/boards/boardBatchStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
+import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -151,7 +152,7 @@ export default function NuevaJugadaPage() {
 
     try {
       localStorage.setItem(configStorageKey, JSON.stringify(nextConfig));
-      createSession({
+      const createdSession = createSession({
         batchId: activeBatch.id,
         restaurantId: selectedRestaurant.id,
         restaurantName: selectedRestaurant.name,
@@ -172,6 +173,7 @@ export default function NuevaJugadaPage() {
         preStartCountdownSeconds: 60,
         activePromotions: getActiveQrCampaignsForRestaurant(selectedRestaurant.id),
       });
+      void createRealtimeSession(createdSession);
       saveLastGameConfig(selectedRestaurant.id, {
         activeTables: nextConfig.activeTables,
         tablePrice: nextConfig.tablePrice,

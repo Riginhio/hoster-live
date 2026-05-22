@@ -46,6 +46,12 @@ import {
   setStoredAudioEnabled,
   unlockGameAudio,
 } from "@/lib/audio/gameAudio";
+import { getSupabaseConfigStatus } from "@/lib/supabase/client";
+import {
+  closeRealtimeSession,
+  createRealtimeSession,
+  updateRealtimeSession,
+} from "@/lib/supabase/sessionRealtime";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -123,6 +129,29 @@ function getWinnerFromSession(session: Session | null): WinnerState | null {
   };
 }
 
+function syncRealtimeFromSession(session: Session) {
+  void updateRealtimeSession(session.id, {
+    status: session.status,
+    autoplayStatus: session.autoplayStatus,
+    autoplayIntervalSeconds: session.autoplayIntervalSeconds,
+    preStartCountdownSeconds: session.preStartCountdownSeconds,
+    preStartStartedAt: session.preStartStartedAt,
+    autoplayStartedAt: session.autoplayStartedAt,
+    calledCards: session.calledCards,
+    winnerFolio: session.winnerFolio,
+    winnerCards: session.winnerCards,
+    playStartedAt: session.playStartedAt,
+    playEndedAt: session.playEndedAt,
+    durationSeconds: session.durationSeconds,
+    activePromotions: session.activePromotions,
+    lastUpdatedAt: session.lastUpdatedAt,
+  }).then((result) => {
+    if (result.mode === "supabase" && (result.error || !result.data)) {
+      void createRealtimeSession(session);
+    }
+  });
+}
+
 export default function JugadaActivaPage() {
   const { currentUser } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
@@ -134,6 +163,7 @@ export default function JugadaActivaPage() {
   const [countdownRemaining, setCountdownRemaining] = useState(0);
   const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const supabaseStatus = getSupabaseConfigStatus();
 
   const restaurantId = currentUser?.restaurantId;
 
@@ -239,6 +269,7 @@ export default function JugadaActivaPage() {
     }
 
     const updatedSession = updateSession(latestSession.id, updates) ?? latestSession;
+    syncRealtimeFromSession(updatedSession);
     setSession(updatedSession);
     setActiveBatch(sessionBatch);
     setCalledCards(hydrateSessionCards(updatedSession.calledCards));
@@ -261,10 +292,13 @@ export default function JugadaActivaPage() {
     }
 
     if (countdownRemaining <= 0) {
-      updateSession(session.id, {
+      const updatedSession = updateSession(session.id, {
         autoplayStatus: "playing",
         autoplayStartedAt: new Date().toISOString(),
       });
+      if (updatedSession) {
+        syncRealtimeFromSession(updatedSession);
+      }
       syncActiveSession();
     }
   }, [autoplayStatus, countdownRemaining, session?.id, syncActiveSession]);
@@ -286,12 +320,22 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    closeSession(session.id, {
+    const closedSession = closeSession(session.id, {
       calledCards: session.calledCards,
       winnerFolio: session.winnerFolio,
       winnerCards: session.winnerCards,
       autoplayStatus: "finished",
     });
+    if (closedSession) {
+      void closeRealtimeSession(closedSession.id, {
+        calledCards: closedSession.calledCards,
+        winnerFolio: closedSession.winnerFolio,
+        winnerCards: closedSession.winnerCards,
+        playEndedAt: closedSession.playEndedAt,
+        durationSeconds: closedSession.durationSeconds,
+        lastUpdatedAt: closedSession.lastUpdatedAt,
+      });
+    }
     setSession(null);
     setActiveBatch(null);
     setCalledCards([]);
@@ -313,12 +357,15 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    updateSession(session.id, {
+    const updatedSession = updateSession(session.id, {
       autoplayStatus: "countdown",
       preStartCountdownSeconds: countdownSeconds,
       preStartStartedAt: new Date().toISOString(),
       autoplayStartedAt: undefined,
     });
+    if (updatedSession) {
+      syncRealtimeFromSession(updatedSession);
+    }
     syncActiveSession();
   }
 
@@ -327,11 +374,14 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    updateSession(session.id, {
+    const updatedSession = updateSession(session.id, {
       autoplayStatus: "playing",
       autoplayIntervalSeconds: intervalMs / 1000,
       autoplayStartedAt: new Date().toISOString(),
     });
+    if (updatedSession) {
+      syncRealtimeFromSession(updatedSession);
+    }
     syncActiveSession();
   }
 
@@ -340,9 +390,12 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    updateSession(session.id, {
+    const updatedSession = updateSession(session.id, {
       autoplayStatus: "paused",
     });
+    if (updatedSession) {
+      syncRealtimeFromSession(updatedSession);
+    }
     syncActiveSession();
   }
 
@@ -351,10 +404,13 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    updateSession(session.id, {
+    const updatedSession = updateSession(session.id, {
       autoplayStatus: "playing",
       autoplayStartedAt: session.autoplayStartedAt ?? new Date().toISOString(),
     });
+    if (updatedSession) {
+      syncRealtimeFromSession(updatedSession);
+    }
     syncActiveSession();
   }
 
@@ -380,6 +436,18 @@ export default function JugadaActivaPage() {
 
   return (
     <Layout title="Jugada activa" eyebrow="HOSTER LIVE">
+      <div className="mb-4 flex justify-end">
+        <span
+          className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${
+            supabaseStatus.connected
+              ? "border-agave/30 bg-agave/10 text-agave"
+              : "border-mezcal/30 bg-mezcal/10 text-mezcal"
+          }`}
+          title={supabaseStatus.message}
+        >
+          {supabaseStatus.connected ? "Realtime conectado" : "Fallback local"}
+        </span>
+      </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <Card accent className="bg-charcoal/90">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -598,9 +666,12 @@ export default function JugadaActivaPage() {
                 onClick={() => {
                   setIntervalMs(option);
                   if (session) {
-                    updateSession(session.id, {
+                    const updatedSession = updateSession(session.id, {
                       autoplayIntervalSeconds: option / 1000,
                     });
+                    if (updatedSession) {
+                      syncRealtimeFromSession(updatedSession);
+                    }
                     syncActiveSession();
                   }
                 }}

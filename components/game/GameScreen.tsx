@@ -20,7 +20,6 @@ import {
   getActiveSessionByRestaurantId,
   getSessionById,
   hydrateSessionCards,
-  updateSession,
   type Session,
 } from "@/lib/sessions/sessionStorage";
 import {
@@ -35,6 +34,12 @@ import {
   setStoredAudioEnabled,
   unlockGameAudio,
 } from "@/lib/audio/gameAudio";
+import { getSupabaseConfigStatus } from "@/lib/supabase/client";
+import {
+  getActiveRealtimeSessionByRestaurantId,
+  realtimeSessionToSession,
+  subscribeToRestaurantSession,
+} from "@/lib/supabase/sessionRealtime";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -113,9 +118,18 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [countdownRemaining, setCountdownRemaining] = useState(0);
   const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [realtimeSession, setRealtimeSession] = useState<Session | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<"connected" | "disconnected" | "fallback">("fallback");
   const lastSyncSignatureRef = useRef("");
   const previousCalledCountRef = useRef(0);
   const previousWinnerFolioRef = useRef<string | undefined>(undefined);
+  const supabaseStatus = getSupabaseConfigStatus();
+  const syncBadgeLabel =
+    realtimeStatus === "connected"
+      ? "Realtime conectado"
+      : realtimeStatus === "disconnected"
+        ? "Realtime desconectado"
+        : "Fallback local";
 
   const restaurant = getRestaurantById(restaurantId);
   const restaurantPrimary = restaurant.primaryColor || restaurant.theme.primaryColor;
@@ -160,7 +174,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   useEffect(() => {
     function syncSession() {
       try {
-        const activeRestaurantSession = getActiveSessionByRestaurantId(restaurantId);
+        const activeRestaurantSession = realtimeSession ?? getActiveSessionByRestaurantId(restaurantId);
         const currentStoredSession = activeSession?.id
           ? getSessionById(activeSession.id)
           : undefined;
@@ -273,7 +287,52 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       globalThis.clearInterval(intervalId);
       window.removeEventListener("storage", syncSession);
     };
-  }, [activeSession?.id, activeSession?.lastUpdatedAt, audioEnabled, restaurantId]);
+  }, [activeSession?.id, activeSession?.lastUpdatedAt, audioEnabled, realtimeSession, restaurantId]);
+
+  useEffect(() => {
+    if (!supabaseStatus.connected) {
+      setRealtimeStatus("fallback");
+      setRealtimeSession(null);
+      return;
+    }
+
+    let isMounted = true;
+
+    getActiveRealtimeSessionByRestaurantId(restaurantId)
+      .then((result) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (result.error) {
+          setRealtimeStatus("disconnected");
+          return;
+        }
+
+        setRealtimeStatus("connected");
+        setRealtimeSession(result.data ? realtimeSessionToSession(result.data) : null);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setRealtimeStatus("disconnected");
+        }
+      });
+
+    const unsubscribe = subscribeToRestaurantSession(
+      restaurantId,
+      (session) => {
+        setRealtimeSession(session ? realtimeSessionToSession(session) : null);
+      },
+      (status) => {
+        setRealtimeStatus(status === "SUBSCRIBED" ? "connected" : "disconnected");
+      },
+    );
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [restaurantId, supabaseStatus.connected]);
 
   useEffect(() => {
     setAudioEnabled(getStoredAudioEnabled());
@@ -295,19 +354,6 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     return () => globalThis.clearInterval(intervalId);
   }, [activeSession]);
 
-  useEffect(() => {
-    if (
-      activeSession?.autoplayStatus === "countdown" &&
-      countdownRemaining <= 0 &&
-      activeSession.status === "active"
-    ) {
-      updateSession(activeSession.id, {
-        autoplayStatus: "playing",
-        autoplayStartedAt: new Date().toISOString(),
-      });
-    }
-  }, [activeSession, countdownRemaining]);
-
   async function enableAudio() {
     const unlocked = await unlockGameAudio();
     setAudioEnabled(unlocked);
@@ -321,6 +367,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   if (visualStatus === "countdown") {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
+        <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
         <section
           className="grid min-h-[calc(100vh-4rem)] w-full max-w-[1800px] place-items-center rounded-lg border border-mezcal/35 bg-[radial-gradient(circle_at_50%_18%,rgba(217,164,65,0.28),rgba(20,17,15,0.92)_48%,rgba(8,7,6,0.99)_100%)] p-6 text-center shadow-cantina md:p-10"
           style={{
@@ -413,6 +460,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   if (visualStatus === "finished" || visualStatus === "idle") {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
+        <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
         <section
           className="relative grid min-h-[calc(100vh-4rem)] w-full max-w-[1800px] overflow-hidden rounded-lg border border-bone/10 bg-[radial-gradient(circle_at_50%_12%,rgba(217,164,65,0.18),rgba(31,161,135,0.12)_32%,rgba(20,17,15,0.94)_58%,rgba(8,7,6,0.99)_100%)] p-6 shadow-cantina md:p-10"
           style={{
@@ -566,6 +614,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
   return (
     <div className="screen-safe cantina-grid bg-obsidian p-4 md:p-6">
+      <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
       <div className="mx-auto grid h-full max-w-[1800px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)_420px]">
         <aside className="order-2 rounded-lg border border-bone/10 bg-obsidian/70 p-4 shadow-cantina backdrop-blur xl:order-1">
           <div className="mb-4 flex items-center justify-between">
@@ -879,6 +928,30 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         Powered by Hoster Live
       </p>
     </div>
+  );
+}
+
+function SyncModeBadge({
+  label,
+  status,
+  className,
+}: {
+  label: string;
+  status: "connected" | "disconnected" | "fallback";
+  className?: string;
+}) {
+  return (
+    <span
+      className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.16em] backdrop-blur ${
+        status === "connected"
+          ? "border-agave/30 bg-agave/12 text-agave"
+          : status === "disconnected"
+            ? "border-chile/30 bg-chile/12 text-[#ff9b91]"
+            : "border-mezcal/30 bg-obsidian/70 text-mezcal"
+      } ${className ?? ""}`}
+    >
+      {label}
+    </span>
   );
 }
 

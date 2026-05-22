@@ -20,6 +20,7 @@ import {
 } from "@/lib/sessions/lastGameConfigStorage";
 import { createSession } from "@/lib/sessions/sessionStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
+import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { RestaurantConfig } from "@/lib/types";
 
 const quickTableCounts = [20, 30, 50];
@@ -132,7 +133,7 @@ export default function GerentePage() {
       restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
     const createdAt = new Date().toISOString();
 
-    createSession({
+    const createdSession = createSession({
       batchId: activeBatch.id,
       restaurantId: restaurant.id,
       restaurantName: restaurant.name,
@@ -154,6 +155,7 @@ export default function GerentePage() {
       activePromotions: getActiveQrCampaignsForRestaurant(restaurant.id),
       createdAt,
     });
+    void createRealtimeSession(createdSession);
 
     const savedConfig = saveLastGameConfig(restaurant.id, {
       activeTables: draftGame.activeTables,
