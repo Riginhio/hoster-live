@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { mockUsers, toAuthUser, type AuthUser, type UserRole } from "@/lib/auth/mockUsers";
+import { getManagerUsers } from "@/lib/auth/managerUsersStorage";
 
 type LoginResult =
   | { ok: true; user: AuthUser; redirectTo: string }
@@ -49,7 +50,28 @@ function parseStoredUser(rawValue: string | null) {
       (user) => user.email === parsedValue.email && user.role === parsedValue.role,
     );
 
-    return validUser ? toAuthUser(validUser) : null;
+    if (validUser) {
+      return toAuthUser(validUser);
+    }
+
+    if (parsedValue.role === "gerente") {
+      const managerUser = getManagerUsers().find(
+        (user) => user.active && user.username === parsedValue.email,
+      );
+
+      return managerUser
+        ? {
+            email: managerUser.username,
+            role: "gerente" as const,
+            name: managerUser.name,
+            restaurantId: managerUser.restaurantId,
+            venueRole: managerUser.role,
+            userId: managerUser.id,
+          }
+        : null;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -66,6 +88,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((email: string, password: string): LoginResult => {
     const normalizedEmail = email.trim().toLowerCase();
+    const managerUser = getManagerUsers().find(
+      (user) => user.active && user.username.toLowerCase() === normalizedEmail && user.password === password,
+    );
+
+    if (managerUser) {
+      const authUser: AuthUser = {
+        email: managerUser.username,
+        role: "gerente",
+        name: managerUser.name,
+        restaurantId: managerUser.restaurantId,
+        venueRole: managerUser.role,
+        userId: managerUser.id,
+      };
+      window.localStorage.setItem(authStorageKey, JSON.stringify(authUser));
+      setCurrentUser(authUser);
+      return { ok: true, user: authUser, redirectTo: getRedirectForRole(authUser) };
+    }
+
     const user = mockUsers.find(
       (mockUser) =>
         mockUser.email.toLowerCase() === normalizedEmail && mockUser.password === password,

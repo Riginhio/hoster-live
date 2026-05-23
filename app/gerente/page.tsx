@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/Card";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 import type { WinMode } from "@/lib/loteria";
+import type { DeckId } from "@/lib/decks";
 import { calculateFinancialBreakdown } from "@/lib/finance";
 import { getActiveBoardBatch, type BoardBatch } from "@/lib/boards/boardBatchStorage";
 import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
@@ -31,11 +32,13 @@ const modeLabels: Record<WinMode, string> = {
   center_four: "Centro 4",
   full_card: "Llena",
 };
+const normalModeOptions: WinMode[] = ["four_corners", "center_four", "x_shape", "full_card"];
 
 type DraftGame = {
   activeTables: number;
   tablePrice: number;
   mode: WinMode;
+  deckId: DeckId;
 };
 
 function formatCurrency(value: number) {
@@ -53,18 +56,20 @@ function getFallbackRestaurant(restaurants: RestaurantConfig[], restaurantId?: s
 function getDraftConfig(restaurant: RestaurantConfig, activeTables: number): DraftGame {
   const lastConfig = getLastGameConfig(restaurant.id);
   const tablePrice =
-    lastConfig && restaurant.allowedPrices.includes(lastConfig.tablePrice)
+    lastConfig && [50, 100, 150].includes(lastConfig.tablePrice)
       ? lastConfig.tablePrice
-      : restaurant.allowedPrices[0] ?? 0;
+      : [50, 100, 150].find((price) => restaurant.allowedPrices.includes(price)) ?? 50;
+  const allowedNormalModes = normalModeOptions.filter((mode) => restaurant.allowedModes.includes(mode));
   const mode =
-    lastConfig && restaurant.allowedModes.includes(lastConfig.mode)
+    lastConfig && allowedNormalModes.includes(lastConfig.mode)
       ? lastConfig.mode
-      : restaurant.allowedModes[0];
+      : allowedNormalModes[0] ?? "four_corners";
 
   return {
     activeTables,
     tablePrice,
     mode,
+    deckId: restaurant.enabledDecks[0] ?? restaurant.activeDeck,
   };
 }
 
@@ -76,6 +81,8 @@ export default function GerentePage() {
   const [draftGame, setDraftGame] = useState<DraftGame | null>(null);
   const [lastConfig, setLastConfig] = useState<LastGameConfig | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const venueRole = currentUser?.venueRole ?? "manager";
+  const isPlay = venueRole === "play";
 
   useEffect(() => {
     const loadedRestaurants = getRestaurants().filter((restaurant) => restaurant.isActive);
@@ -85,6 +92,19 @@ export default function GerentePage() {
     setActiveBatch(restaurant ? getActiveBoardBatch(restaurant.id) ?? null : null);
     setLastConfig(restaurant ? getLastGameConfig(restaurant.id) : null);
   }, [currentUser?.restaurantId]);
+
+  useEffect(() => {
+    if (!draftGame) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [draftGame]);
 
   const restaurant = useMemo(
     () => getFallbackRestaurant(restaurants, currentUser?.restaurantId),
@@ -99,8 +119,10 @@ export default function GerentePage() {
     return calculateFinancialBreakdown({
       activeTables: draftGame.activeTables,
       tablePrice: draftGame.tablePrice,
-      commissionHLPercent: restaurant.commissionHLPercent,
-      commissionRestaurantPercent: restaurant.commissionRestaurantPercent,
+      restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+      hlCommissionMode: restaurant.hlCommissionMode,
+      hlCommissionValue: restaurant.hlCommissionValue,
+      hlFixedFee: restaurant.hlFixedFee,
     });
   }, [draftGame, restaurant]);
 
@@ -129,8 +151,7 @@ export default function GerentePage() {
       return;
     }
 
-    const commissionPercent =
-      restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
+    const commissionPercent = restaurant.restaurantCommissionPercent;
     const createdAt = new Date().toISOString();
 
     const createdSession = createSession({
@@ -138,11 +159,21 @@ export default function GerentePage() {
       restaurantId: restaurant.id,
       restaurantName: restaurant.name,
       mode: draftGame.mode,
+      deckId: draftGame.deckId,
       activeTables: draftGame.activeTables,
       tablePrice: draftGame.tablePrice,
+      restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+      restaurantCommissionAmount: financialBreakdown.restaurantCommissionAmount,
+      hlCommissionMode: financialBreakdown.hlCommissionMode,
+      hlCommissionValue: financialBreakdown.hlCommissionValue,
+      hlCommissionAmount: financialBreakdown.hlCommissionAmount,
+      commissionTotalPercent: financialBreakdown.commissionTotalPercent,
+      commissionTotalAmount: financialBreakdown.commissionTotalAmount,
+      hlFixedFee: financialBreakdown.hlFixedFee,
+      restaurantNetAmount: financialBreakdown.restaurantNetAmount,
       commissionPercent,
-      commissionHLPercent: restaurant.commissionHLPercent,
-      commissionRestaurantPercent: restaurant.commissionRestaurantPercent,
+      commissionHLPercent: financialBreakdown.commissionHLPercent,
+      commissionRestaurantPercent: restaurant.restaurantCommissionPercent,
       commissionNetPercent: financialBreakdown.commissionNetPercent,
       commissionHLAmount: financialBreakdown.commissionHLAmount,
       commissionRestaurantAmount: financialBreakdown.commissionRestaurantAmount,
@@ -153,6 +184,9 @@ export default function GerentePage() {
       autoplayIntervalSeconds: 5,
       preStartCountdownSeconds: 60,
       activePromotions: getActiveQrCampaignsForRestaurant(restaurant.id),
+      operatorUserId: currentUser?.userId,
+      operatorUsername: currentUser?.email ?? currentUser?.name,
+      operatorRole: venueRole,
       createdAt,
     });
     void createRealtimeSession(createdSession);
@@ -230,10 +264,12 @@ export default function GerentePage() {
               Repite tablas y costo del restaurante; solo confirma la modalidad antes de arrancar.
             </p>
           </div>
-          <ButtonLink href="/gerente/nueva-jugada" variant="secondary">
-            <Sparkles className="h-4 w-4" />
-            Jugada especial
-          </ButtonLink>
+          {!isPlay ? (
+            <ButtonLink href="/gerente/nueva-jugada" variant="secondary">
+              <Sparkles className="h-4 w-4" />
+              Jugada especial
+            </ButtonLink>
+          ) : null}
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-4">
@@ -248,14 +284,16 @@ export default function GerentePage() {
               Repetir jugada {tableCount}
             </Button>
           ))}
-          <ButtonLink
-            href="/gerente/nueva-jugada"
-            variant="secondary"
-            className="h-24 flex-col"
-          >
-            <Sparkles className="h-5 w-5" />
-            Jugada especial
-          </ButtonLink>
+          {!isPlay ? (
+            <ButtonLink
+              href="/gerente/nueva-jugada"
+              variant="secondary"
+              className="h-24 flex-col"
+            >
+              <Sparkles className="h-5 w-5" />
+              Jugada especial
+            </ButtonLink>
+          ) : null}
         </div>
 
         {feedback ? (
@@ -266,8 +304,8 @@ export default function GerentePage() {
       </Card>
 
       {draftGame && restaurant && financialBreakdown ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-obsidian/80 px-4 backdrop-blur">
-          <Card accent className="w-full max-w-2xl">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-obsidian/80 px-3 py-4 backdrop-blur">
+          <Card accent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto overscroll-contain">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.24em] text-mezcal">
@@ -283,9 +321,32 @@ export default function GerentePage() {
             </div>
 
             <fieldset className="mt-5">
+              {restaurant.enabledDecks.length > 1 ? (
+                <div className="mb-4">
+                  <legend className="mb-2 text-sm font-semibold text-bone/70">Deck</legend>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {restaurant.enabledDecks.map((deckId) => (
+                      <button
+                        key={deckId}
+                        type="button"
+                        onClick={() => setDraftGame((current) => current && { ...current, deckId })}
+                        className={`h-12 rounded-lg border px-4 text-sm font-black transition ${
+                          draftGame.deckId === deckId
+                            ? "border-mezcal bg-mezcal text-obsidian"
+                            : "border-bone/10 bg-bone/[0.04] text-bone hover:bg-bone/10"
+                        }`}
+                      >
+                        {deckId === "worldcup2026" ? "FIFA 2026" : "Loteria"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <legend className="mb-2 text-sm font-semibold text-bone/70">Modalidad</legend>
               <div className="grid gap-3 sm:grid-cols-2">
-                {restaurant.allowedModes.map((mode) => (
+                {normalModeOptions
+                  .filter((mode) => restaurant.allowedModes.includes(mode))
+                  .map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -296,9 +357,9 @@ export default function GerentePage() {
                         : "border-bone/10 bg-bone/[0.04] text-bone hover:bg-bone/10"
                     }`}
                   >
-                    {modeLabels[mode]}
-                  </button>
-                ))}
+                      {modeLabels[mode]}
+                    </button>
+                  ))}
               </div>
             </fieldset>
 
@@ -307,15 +368,27 @@ export default function GerentePage() {
               <PreviewItem label="Costo por tabla" value={formatCurrency(draftGame.tablePrice)} />
               <PreviewItem label="Ingreso bruto" value={formatCurrency(financialBreakdown.grossRevenue)} />
               <PreviewItem
-                label="Comision HL"
-                value={`${financialBreakdown.commissionHLPercent}% - ${formatCurrency(
-                  financialBreakdown.commissionHLAmount,
-                )}`}
+                label="Fee HL"
+                value={
+                  financialBreakdown.hlCommissionMode === "percent"
+                    ? `${financialBreakdown.hlCommissionValue}% - ${formatCurrency(financialBreakdown.hlCommissionAmount)}`
+                    : formatCurrency(financialBreakdown.hlCommissionAmount)
+                }
               />
               <PreviewItem
                 label="Comision restaurante"
-                value={`${financialBreakdown.commissionRestaurantPercent}% - ${formatCurrency(
-                  financialBreakdown.commissionRestaurantAmount,
+                value={`${financialBreakdown.restaurantCommissionPercent}% - ${formatCurrency(
+                  financialBreakdown.restaurantCommissionAmount,
+                )}`}
+              />
+              <PreviewItem
+                label="Restaurante neto"
+                value={formatCurrency(financialBreakdown.restaurantNetAmount)}
+              />
+              <PreviewItem
+                label="Comision total"
+                value={`${financialBreakdown.commissionTotalPercent}% - ${formatCurrency(
+                  financialBreakdown.commissionTotalAmount,
                 )}`}
               />
               <PreviewItem

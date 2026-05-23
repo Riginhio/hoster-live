@@ -125,7 +125,7 @@ function getWinnerFromSession(session: Session | null): WinnerState | null {
 
   return {
     folio: session.winnerFolio,
-    cards: hydrateSessionCards(session.winnerCards),
+    cards: hydrateSessionCards(session.winnerCards, session.deckId),
   };
 }
 
@@ -175,10 +175,11 @@ export default function JugadaActivaPage() {
     return toLoteriaBoards(activeBatch.boards).slice(0, session.activeTables);
   }, [activeBatch, session]);
 
-  const deck = useMemo(() => (session ? getSessionDeck(session.id) : []), [session]);
+  const deck = useMemo(() => (session ? getSessionDeck(session.id, session.deckId) : []), [session]);
+  const deckSize = deck.length || 54;
   const currentCard = calledCards[calledCards.length - 1] ?? null;
   const nextCard = session ? deck[session.calledCards.length] ?? null : null;
-  const progressPercent = Math.round((calledCards.length / 54) * 100);
+  const progressPercent = Math.round((calledCards.length / deckSize) * 100);
   const statusLabel = session?.status === "active" ? "activa" : "finalizada";
   const autoplayStatus = session?.autoplayStatus ?? "idle";
   const activePromotions = session?.activePromotions ?? [];
@@ -198,7 +199,9 @@ export default function JugadaActivaPage() {
 
     setSession(normalizedSession);
     setActiveBatch(normalizedSession ? getBatchForSession(normalizedSession) : null);
-    setCalledCards(normalizedSession ? hydrateSessionCards(normalizedSession.calledCards) : []);
+    setCalledCards(
+      normalizedSession ? hydrateSessionCards(normalizedSession.calledCards, normalizedSession.deckId) : [],
+    );
     setWinner(getWinnerFromSession(normalizedSession));
 
   }, [restaurantId, session?.id]);
@@ -240,7 +243,7 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    const latestDeck = getSessionDeck(latestSession.id);
+    const latestDeck = getSessionDeck(latestSession.id, latestSession.deckId);
     const nextSessionCard = latestDeck[latestSession.calledCards.length];
     const sessionBatch = getBatchForSession(latestSession);
     const sessionBoards = sessionBatch
@@ -272,7 +275,7 @@ export default function JugadaActivaPage() {
     syncRealtimeFromSession(updatedSession);
     setSession(updatedSession);
     setActiveBatch(sessionBatch);
-    setCalledCards(hydrateSessionCards(updatedSession.calledCards));
+    setCalledCards(hydrateSessionCards(updatedSession.calledCards, updatedSession.deckId));
     setWinner(getWinnerFromSession(updatedSession));
     playGameTone(winningBoard ? "winner" : "card", audioEnabled);
 
@@ -478,7 +481,7 @@ export default function JugadaActivaPage() {
             <InfoTile label="Tablas en juego" value={String(session.activeTables)} />
             <InfoTile label="Costo tabla" value={formatCurrency(session.tablePrice)} />
             <InfoTile label="Premio" value={formatCurrency(session.prizeAmount)} />
-            <InfoTile label="Cartas cantadas" value={`${calledCards.length}/54`} />
+            <InfoTile label="Cartas cantadas" value={`${calledCards.length}/${deckSize}`} />
             <InfoTile label="Estado" value={autoplayStatus} />
             <InfoTile label="Tiempo de jugada" value={formatDuration(playElapsedSeconds)} />
           </div>
@@ -489,7 +492,7 @@ export default function JugadaActivaPage() {
             Progreso operativo
           </p>
           <div className="mt-4 space-y-4">
-            <ProgressRow icon={Clock3} label="Cartas cantadas" value={`${calledCards.length}/54`} />
+            <ProgressRow icon={Clock3} label="Cartas cantadas" value={`${calledCards.length}/${deckSize}`} />
             <ProgressRow icon={ScanSearch} label="Tablas revisadas" value={String(activeBoards.length)} />
             <ProgressRow icon={Trophy} label="Folio ganador" value={winner?.folio ?? "Pendiente"} />
             <div>
@@ -712,6 +715,11 @@ export default function JugadaActivaPage() {
             <p className="mt-4 text-sm font-black uppercase tracking-[0.28em] text-bone/50">
               {currentCard?.name ?? "Carta actual"}
             </p>
+            {currentCard?.confederation ? (
+              <p className="mt-2 text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+                {currentCard.confederation}
+              </p>
+            ) : null}
           </div>
         </Card>
 
@@ -721,7 +729,7 @@ export default function JugadaActivaPage() {
               <p className="text-xs font-black uppercase tracking-[0.22em] text-mezcal">
                 Historial
               </p>
-              <h3 className="font-display text-3xl text-bone">{calledCards.length}/54</h3>
+              <h3 className="font-display text-3xl text-bone">{calledCards.length}/{deckSize}</h3>
             </div>
             <CircleDollarSign className="text-agave" size={28} />
           </div>
@@ -740,10 +748,15 @@ export default function JugadaActivaPage() {
                   alt={card.name}
                   width={72}
                   height={114}
-                  className="h-12 w-9 rounded object-cover"
+                  className="h-12 w-9 rounded bg-bone object-contain p-0.5"
                 />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-bone">{card.name}</p>
+                  {card.confederation ? (
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-mezcal">
+                      {card.confederation}
+                    </p>
+                  ) : null}
                   <p className="text-xs text-bone/45">
                     Carta {String(card.number).padStart(2, "0")}
                   </p>

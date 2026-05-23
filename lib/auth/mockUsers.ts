@@ -9,6 +9,8 @@ export type MockUser = {
   name: string;
   restaurantId?: string;
   restaurantName?: string;
+  venueRole?: "manager" | "play";
+  userId?: string;
 };
 
 export type AuthUser = Omit<MockUser, "password">;
@@ -27,6 +29,8 @@ export const mockUsers: MockUser[] = [
     name: "Carolina Mendez",
     restaurantId: "rancho-viejo",
     restaurantName: "Rancho Viejo",
+    venueRole: "manager",
+    userId: "mock-gerente-rancho-viejo",
   },
   {
     email: "tv@hosterlive.mx",
@@ -45,5 +49,7 @@ export function toAuthUser(user: MockUser): AuthUser {
     name: user.name,
     restaurantId: user.restaurantId ? normalizeRestaurantSlug(user.restaurantId) : undefined,
     restaurantName: user.restaurantName,
+    venueRole: user.venueRole,
+    userId: user.userId,
   };
 }

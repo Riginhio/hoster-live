@@ -5,9 +5,9 @@ export const restaurants = defaultRestaurants;
 export function calculatePrize(
   activeTables: number,
   tablePrice: number,
-  commissionPercent: number,
+  restaurantCommissionPercent: number,
 ) {
-  return Math.round(activeTables * tablePrice * (1 - commissionPercent / 100));
+  return Math.round(activeTables * tablePrice * (1 - restaurantCommissionPercent / 100));
 }
 
 export function getRestaurantById(restaurantId: string) {

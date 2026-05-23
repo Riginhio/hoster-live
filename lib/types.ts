@@ -1,4 +1,5 @@
 import type { WinMode } from "@/lib/loteria";
+import type { DeckId, GameId } from "@/lib/decks";
 
 export type BusinessType =
   | "bar"
@@ -31,8 +32,14 @@ export type RestaurantConfig = {
   averageHostesses: number;
   strongDays: string[];
   estimatedGamesPerWeek: number;
-  audienceType: string;
+  audienceType: string[];
+  audienceNotes: string;
   notes: string;
+  restaurantCommissionPercent: number;
+  hlCommissionMode: "fixed" | "percent";
+  hlCommissionValue: number;
+  hlFixedFee: number;
+  activeDeck: DeckId;
   commissionPercent: number;
   commissionHLPercent: number;
   commissionRestaurantPercent: number;
@@ -40,6 +47,8 @@ export type RestaurantConfig = {
   allowedPrices: number[];
   allowedModes: WinMode[];
   enabledGames: string[];
+  activeGames: GameId[];
+  enabledDecks: DeckId[];
   primaryColor: string;
   secondaryColor: string;
   accentColor: string;

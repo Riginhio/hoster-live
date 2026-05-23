@@ -11,6 +11,13 @@ import {
   weeklyMetrics as mockWeeklyMetrics,
 } from "@/lib/mockAnalytics";
 import { getSessions, type Session } from "@/lib/sessions/sessionStorage";
+import {
+  getSessionGrossRevenue,
+  getSessionHlFixedFee,
+  getSessionPrizeAmount,
+  getSessionRestaurantCommissionAmount,
+  getSessionRestaurantNetAmount,
+} from "@/lib/sessions/sessionFinancials";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-MX", {
@@ -59,26 +66,6 @@ function statusClassName(status: string) {
   return "bg-mezcal/14 text-mezcal ring-mezcal/28";
 }
 
-function getGrossRevenue(session: Session) {
-  return session.grossRevenue ?? session.activeTables * session.tablePrice;
-}
-
-function getCommissionHL(session: Session) {
-  return session.commissionHLAmount ?? getGrossRevenue(session) * ((session.commissionHLPercent ?? 0) / 100);
-}
-
-function getCommissionRestaurant(session: Session) {
-  return (
-    session.commissionRestaurantAmount ??
-    getGrossRevenue(session) *
-      ((session.commissionRestaurantPercent ?? session.commissionPercent ?? 0) / 100)
-  );
-}
-
-function getCommissionNet(session: Session) {
-  return session.commissionNetAmount ?? getCommissionHL(session) + getCommissionRestaurant(session);
-}
-
 export default function MasterDashboardPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
 
@@ -88,17 +75,17 @@ export default function MasterDashboardPage() {
 
   const sessionMetrics = useMemo(() => {
     const validSessions = sessions.filter((session) => session.status !== "active" || session.calledCards.length > 0);
-    const grossRevenue = validSessions.reduce((total, session) => total + getGrossRevenue(session), 0);
+    const grossRevenue = validSessions.reduce((total, session) => total + getSessionGrossRevenue(session), 0);
     const hosterCommission = validSessions.reduce(
-      (total, session) => total + getCommissionHL(session),
+      (total, session) => total + getSessionHlFixedFee(session),
       0,
     );
     const restaurantCommission = validSessions.reduce(
-      (total, session) => total + getCommissionRestaurant(session),
+      (total, session) => total + getSessionRestaurantCommissionAmount(session),
       0,
     );
-    const commissionNet = validSessions.reduce((total, session) => total + getCommissionNet(session), 0);
-    const prizes = validSessions.reduce((total, session) => total + session.prizeAmount, 0);
+    const restaurantNet = validSessions.reduce((total, session) => total + getSessionRestaurantNetAmount(session), 0);
+    const prizes = validSessions.reduce((total, session) => total + getSessionPrizeAmount(session), 0);
     const hosterLiveRevenue = hosterCommission;
     const ticketAverage =
       validSessions.length > 0
@@ -118,7 +105,7 @@ export default function MasterDashboardPage() {
       grossRevenue,
       hosterCommission,
       restaurantCommission,
-      commissionNet,
+      restaurantNet,
       prizes,
       hosterLiveRevenue,
       ticketAverage,
@@ -141,14 +128,14 @@ export default function MasterDashboardPage() {
             note: "Calculada por sesion",
           },
           {
-            label: "Comision neta",
-            value: formatCurrency(sessionMetrics.commissionNet),
-            note: "HL + restaurante",
+            label: "Restaurante neto",
+            value: formatCurrency(sessionMetrics.restaurantNet),
+            note: "Despues de fee HL",
           },
           {
             label: "Utilidad Hoster Live",
             value: formatCurrency(sessionMetrics.hosterLiveRevenue),
-            note: "Comision HL",
+            note: "Fee fijo por jugada",
           },
           {
             label: "Premios entregados",
@@ -184,12 +171,12 @@ export default function MasterDashboardPage() {
               profit: 0,
               status: "finalized",
             };
-            const profit = getCommissionHL(session);
+            const profit = getSessionHlFixedFee(session);
 
             map.set(session.restaurantId, {
               ...current,
               games: current.games + 1,
-              grossRevenue: current.grossRevenue + getGrossRevenue(session),
+              grossRevenue: current.grossRevenue + getSessionGrossRevenue(session),
               profit: current.profit + profit,
               status: session.status === "active" ? "active" : current.status,
             });
@@ -206,7 +193,7 @@ export default function MasterDashboardPage() {
       : sessions.slice(0, 5).map((session) => ({
           restaurant: session.restaurantName,
           mode: session.mode,
-          prize: session.prizeAmount,
+          prize: getSessionPrizeAmount(session),
           time: new Date(session.startedAt).toLocaleTimeString("es-MX", {
             hour: "2-digit",
             minute: "2-digit",
@@ -224,7 +211,7 @@ export default function MasterDashboardPage() {
                 month: "2-digit",
               });
               const current = map[day] ?? { day, revenue: 0, games: 0 };
-              current.revenue += getGrossRevenue(session);
+              current.revenue += getSessionGrossRevenue(session);
               current.games += 1;
               map[day] = current;
               return map;

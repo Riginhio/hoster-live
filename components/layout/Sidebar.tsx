@@ -13,24 +13,38 @@ import {
   Store,
   Table2,
   TrendingUp,
+  Users,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { getSupabaseConfigStatus } from "@/lib/supabase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import type { UserRole } from "@/lib/auth/mockUsers";
 
-const links = [
+type SidebarLink = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  roles: UserRole[];
+  venueRoles?: Array<"manager" | "play">;
+};
+
+const links: SidebarLink[] = [
   { href: "/master", label: "Master", icon: LayoutDashboard, roles: ["master"] },
   { href: "/master/dashboard", label: "Dashboard", icon: TrendingUp, roles: ["master"] },
   { href: "/master/jugadas", label: "Jugadas", icon: History, roles: ["master"] },
   { href: "/master/lotes", label: "Lotes", icon: Table2, roles: ["master"] },
   { href: "/master/qr-campaigns", label: "QR Marketing", icon: QrCode, roles: ["master"] },
   { href: "/master/restaurantes", label: "Restaurantes", icon: Store, roles: ["master"] },
+  { href: "/master/usuarios", label: "Usuarios gerente", icon: Users, roles: ["master"] },
+  { href: "/master/tvs", label: "TVs", icon: MonitorPlay, roles: ["master"] },
   { href: "/master/cortes", label: "Cortes", icon: BarChart3, roles: ["master"] },
-  { href: "/gerente", label: "Gerente", icon: Clapperboard, roles: ["gerente"] },
-  { href: "/gerente/nueva-jugada", label: "Jugada especial", icon: Sparkles, roles: ["gerente"] },
+  { href: "/gerente", label: "Inicio", icon: Clapperboard, roles: ["gerente"] },
+  { href: "/gerente/nueva-jugada", label: "Jugada especial", icon: Sparkles, roles: ["gerente"], venueRoles: ["manager"] },
   { href: "/gerente/jugada-activa", label: "Jugada activa", icon: Radio, roles: ["gerente"] },
   { href: "/gerente/tablas", label: "Tablas", icon: Table2, roles: ["gerente"] },
+  { href: "/gerente/reportes", label: "Reportes", icon: BarChart3, roles: ["gerente"], venueRoles: ["manager"] },
+  { href: "/gerente/promociones", label: "Promociones", icon: QrCode, roles: ["gerente"], venueRoles: ["manager"] },
+  { href: "/gerente/usuarios", label: "Usuarios", icon: Users, roles: ["gerente"], venueRoles: ["manager"] },
   { href: "/tv/rancho-viejo", label: "Pantalla TV", icon: MonitorPlay, roles: ["tv"] },
   { href: "/admin/tablas", label: "Tablas", icon: Table2, roles: ["master"] },
 ];
@@ -38,9 +52,13 @@ const links = [
 export function Sidebar() {
   const supabaseStatus = getSupabaseConfigStatus();
   const { currentUser } = useAuth();
-  const visibleLinks = links.filter((item) =>
-    currentUser ? item.roles.includes(currentUser.role as UserRole) : false,
-  );
+  const visibleLinks = links.filter((item) => {
+    if (!currentUser || !item.roles.includes(currentUser.role as UserRole)) {
+      return false;
+    }
+
+    return !item.venueRoles || item.venueRoles.includes(currentUser.venueRole ?? "manager");
+  });
 
   return (
     <aside className="hidden w-72 shrink-0 border-r border-bone/10 bg-obsidian/70 p-4 backdrop-blur lg:block">

@@ -5,6 +5,13 @@ import { Search, Trophy } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Layout } from "@/components/layout/Layout";
 import { getSessions, type Session, type SessionStatus } from "@/lib/sessions/sessionStorage";
+import {
+  getSessionGrossRevenue,
+  getSessionHlFixedFee,
+  getSessionPrizeAmount,
+  getSessionRestaurantCommissionAmount,
+  getSessionRestaurantNetAmount,
+} from "@/lib/sessions/sessionFinancials";
 
 const inputClassName =
   "h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none transition placeholder:text-bone/30 focus:border-mezcal/70";
@@ -30,26 +37,6 @@ function formatDate(value: string) {
     month: "2-digit",
     year: "numeric",
   });
-}
-
-function getGrossRevenue(session: Session) {
-  return session.grossRevenue ?? session.activeTables * session.tablePrice;
-}
-
-function getCommissionHL(session: Session) {
-  return session.commissionHLAmount ?? getGrossRevenue(session) * ((session.commissionHLPercent ?? 0) / 100);
-}
-
-function getRestaurantCommission(session: Session) {
-  return (
-    session.commissionRestaurantAmount ??
-    getGrossRevenue(session) *
-      ((session.commissionRestaurantPercent ?? session.commissionPercent ?? 0) / 100)
-  );
-}
-
-function getNetCommission(session: Session) {
-  return session.commissionNetAmount ?? getCommissionHL(session) + getRestaurantCommission(session);
 }
 
 function statusLabel(status: SessionStatus) {
@@ -113,35 +100,38 @@ export default function MasterJugadasPage() {
       {
         label: "Ingreso bruto",
         value: formatCurrency(
-          filteredSessions.reduce((total, session) => total + getGrossRevenue(session), 0),
+          filteredSessions.reduce((total, session) => total + getSessionGrossRevenue(session), 0),
         ),
         note: "Suma de tablas vendidas",
       },
       {
-        label: "Comision HL",
+        label: "Fee HL",
         value: formatCurrency(
-          filteredSessions.reduce((total, session) => total + getCommissionHL(session), 0),
+          filteredSessions.reduce((total, session) => total + getSessionHlFixedFee(session), 0),
         ),
         note: "Revenue Hoster Live",
       },
       {
         label: "Comision restaurante",
         value: formatCurrency(
-          filteredSessions.reduce((total, session) => total + getRestaurantCommission(session), 0),
+          filteredSessions.reduce(
+            (total, session) => total + getSessionRestaurantCommissionAmount(session),
+            0,
+          ),
         ),
         note: "Revenue venue",
       },
       {
-        label: "Comision neta",
+        label: "Restaurante neto",
         value: formatCurrency(
-          filteredSessions.reduce((total, session) => total + getNetCommission(session), 0),
+          filteredSessions.reduce((total, session) => total + getSessionRestaurantNetAmount(session), 0),
         ),
-        note: "HL + restaurante",
+        note: "Despues de fee HL",
       },
       {
         label: "Premios entregados",
         value: formatCurrency(
-          finalizedSessions.reduce((total, session) => total + session.prizeAmount, 0),
+          finalizedSessions.reduce((total, session) => total + getSessionPrizeAmount(session), 0),
         ),
         note: "Bolsa liquidada",
       },
@@ -250,9 +240,9 @@ export default function MasterJugadasPage() {
                 <th className="px-5 py-4 font-semibold">Modalidad</th>
                 <th className="px-5 py-4 font-semibold">Tablas</th>
                 <th className="px-5 py-4 font-semibold">Ingreso</th>
-                <th className="px-5 py-4 font-semibold">Comision HL</th>
+                <th className="px-5 py-4 font-semibold">Fee HL</th>
                 <th className="px-5 py-4 font-semibold">Comision Rest.</th>
-                <th className="px-5 py-4 font-semibold">Comision neta</th>
+                <th className="px-5 py-4 font-semibold">Rest. neto</th>
                 <th className="px-5 py-4 font-semibold">Premio</th>
                 <th className="px-5 py-4 font-semibold">Ganador</th>
                 <th className="px-5 py-4 font-semibold">Status</th>
@@ -275,20 +265,20 @@ export default function MasterJugadasPage() {
                     {session.activeTables} x {formatCurrency(session.tablePrice)}
                   </td>
                   <td className="px-5 py-4 font-semibold text-bone">
-                    {formatCurrency(getGrossRevenue(session))}
+                    {formatCurrency(getSessionGrossRevenue(session))}
                   </td>
                   <td className="px-5 py-4 text-sm text-bone/68">
-                    {session.commissionHLPercent}% - {formatCurrency(getCommissionHL(session))}
+                    {formatCurrency(getSessionHlFixedFee(session))}
                   </td>
                   <td className="px-5 py-4 text-sm text-bone/68">
-                    {session.commissionRestaurantPercent}% -{" "}
-                    {formatCurrency(getRestaurantCommission(session))}
+                    {session.restaurantCommissionPercent ?? session.commissionRestaurantPercent}% -{" "}
+                    {formatCurrency(getSessionRestaurantCommissionAmount(session))}
                   </td>
                   <td className="px-5 py-4 text-sm text-bone/68">
-                    {session.commissionNetPercent}% - {formatCurrency(getNetCommission(session))}
+                    {formatCurrency(getSessionRestaurantNetAmount(session))}
                   </td>
                   <td className="px-5 py-4 text-sm text-mezcal">
-                    {formatCurrency(session.prizeAmount)}
+                    {formatCurrency(getSessionPrizeAmount(session))}
                   </td>
                   <td className="px-5 py-4">
                     <span className="inline-flex items-center gap-2 rounded-full bg-mezcal/12 px-3 py-1 text-xs font-bold text-mezcal ring-1 ring-mezcal/25">
@@ -337,19 +327,19 @@ export default function MasterJugadasPage() {
                 <div>
                   <p className="text-bone/42">Ingreso</p>
                   <p className="mt-1 font-semibold text-bone">
-                    {formatCurrency(getGrossRevenue(session))}
+                    {formatCurrency(getSessionGrossRevenue(session))}
                   </p>
                 </div>
                 <div>
-                  <p className="text-bone/42">Comision HL</p>
+                  <p className="text-bone/42">Fee HL</p>
                   <p className="mt-1 font-semibold text-agave">
-                    {formatCurrency(getCommissionHL(session))}
+                    {formatCurrency(getSessionHlFixedFee(session))}
                   </p>
                 </div>
                 <div>
                   <p className="text-bone/42">Premio</p>
                   <p className="mt-1 font-semibold text-mezcal">
-                    {formatCurrency(session.prizeAmount)}
+                    {formatCurrency(getSessionPrizeAmount(session))}
                   </p>
                 </div>
                 <div>

@@ -5,6 +5,13 @@ import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { StatCard } from "@/components/StatCard";
 import { getSessions, type Session } from "@/lib/sessions/sessionStorage";
+import {
+  getSessionGrossRevenue,
+  getSessionHlFixedFee,
+  getSessionPrizeAmount,
+  getSessionRestaurantCommissionAmount,
+  getSessionRestaurantNetAmount,
+} from "@/lib/sessions/sessionFinancials";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-MX", {
@@ -21,26 +28,6 @@ function formatDuration(totalSeconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function getGrossRevenue(session: Session) {
-  return session.grossRevenue ?? session.activeTables * session.tablePrice;
-}
-
-function getCommissionHL(session: Session) {
-  return session.commissionHLAmount ?? getGrossRevenue(session) * ((session.commissionHLPercent ?? 0) / 100);
-}
-
-function getCommissionRestaurant(session: Session) {
-  return (
-    session.commissionRestaurantAmount ??
-    getGrossRevenue(session) *
-      ((session.commissionRestaurantPercent ?? session.commissionPercent ?? 0) / 100)
-  );
-}
-
-function getCommissionNet(session: Session) {
-  return session.commissionNetAmount ?? getCommissionHL(session) + getCommissionRestaurant(session);
-}
-
 export default function CortesPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
 
@@ -52,19 +39,19 @@ export default function CortesPage() {
     () =>
       sessions.reduce(
         (summary, session) => ({
-          grossRevenue: summary.grossRevenue + getGrossRevenue(session),
-          commissionHL: summary.commissionHL + getCommissionHL(session),
+          grossRevenue: summary.grossRevenue + getSessionGrossRevenue(session),
+          hlFixedFee: summary.hlFixedFee + getSessionHlFixedFee(session),
           commissionRestaurant:
-            summary.commissionRestaurant + getCommissionRestaurant(session),
-          commissionNet: summary.commissionNet + getCommissionNet(session),
-          prizes: summary.prizes + session.prizeAmount,
+            summary.commissionRestaurant + getSessionRestaurantCommissionAmount(session),
+          restaurantNet: summary.restaurantNet + getSessionRestaurantNetAmount(session),
+          prizes: summary.prizes + getSessionPrizeAmount(session),
           durationSeconds: summary.durationSeconds + (session.durationSeconds ?? 0),
         }),
         {
           grossRevenue: 0,
-          commissionHL: 0,
+          hlFixedFee: 0,
           commissionRestaurant: 0,
-          commissionNet: 0,
+          restaurantNet: 0,
           prizes: 0,
           durationSeconds: 0,
         },
@@ -80,9 +67,9 @@ export default function CortesPage() {
             name: session.restaurantName,
             games: 0,
             grossRevenue: 0,
-            commissionHL: 0,
+            hlFixedFee: 0,
             commissionRestaurant: 0,
-            commissionNet: 0,
+            restaurantNet: 0,
             prizes: 0,
             durationSeconds: 0,
           };
@@ -90,17 +77,17 @@ export default function CortesPage() {
           map.set(session.restaurantId, {
             name: current.name,
             games: current.games + 1,
-            grossRevenue: current.grossRevenue + getGrossRevenue(session),
-            commissionHL: current.commissionHL + getCommissionHL(session),
+            grossRevenue: current.grossRevenue + getSessionGrossRevenue(session),
+            hlFixedFee: current.hlFixedFee + getSessionHlFixedFee(session),
             commissionRestaurant:
-              current.commissionRestaurant + getCommissionRestaurant(session),
-            commissionNet: current.commissionNet + getCommissionNet(session),
-            prizes: current.prizes + session.prizeAmount,
+              current.commissionRestaurant + getSessionRestaurantCommissionAmount(session),
+            restaurantNet: current.restaurantNet + getSessionRestaurantNetAmount(session),
+            prizes: current.prizes + getSessionPrizeAmount(session),
             durationSeconds: current.durationSeconds + (session.durationSeconds ?? 0),
           });
 
           return map;
-        }, new Map<string, { name: string; games: number; grossRevenue: number; commissionHL: number; commissionRestaurant: number; commissionNet: number; prizes: number; durationSeconds: number }>()),
+        }, new Map<string, { name: string; games: number; grossRevenue: number; hlFixedFee: number; commissionRestaurant: number; restaurantNet: number; prizes: number; durationSeconds: number }>()),
       ).map(([, value]) => value),
     [sessions],
   );
@@ -109,13 +96,13 @@ export default function CortesPage() {
     <Layout title="Cortes" eyebrow="Master">
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
         <StatCard label="Ingreso bruto" value={formatCurrency(totals.grossRevenue)} note="Ventas" />
-        <StatCard label="Comision HL" value={formatCurrency(totals.commissionHL)} note="Hoster Live" />
+        <StatCard label="Fee HL" value={formatCurrency(totals.hlFixedFee)} note="Hoster Live" />
         <StatCard
           label="Comision restaurante"
           value={formatCurrency(totals.commissionRestaurant)}
           note="Venue"
         />
-        <StatCard label="Comision neta" value={formatCurrency(totals.commissionNet)} note="HL + venue" />
+        <StatCard label="Restaurante neto" value={formatCurrency(totals.restaurantNet)} note="Despues de fee HL" />
         <StatCard label="Premios" value={formatCurrency(totals.prizes)} note="Entregados" />
         <StatCard label="Duracion" value={formatDuration(totals.durationSeconds)} note="Tiempo jugado" />
       </div>
@@ -130,9 +117,9 @@ export default function CortesPage() {
                 <th className="px-5 py-4">Restaurante</th>
                 <th className="px-5 py-4">Jugadas</th>
                 <th className="px-5 py-4">Ingreso bruto</th>
-                <th className="px-5 py-4">Comision HL</th>
+                <th className="px-5 py-4">Fee HL</th>
                 <th className="px-5 py-4">Comision restaurante</th>
-                <th className="px-5 py-4">Comision neta</th>
+                <th className="px-5 py-4">Restaurante neto</th>
                 <th className="px-5 py-4">Premios</th>
                 <th className="px-5 py-4">Duracion</th>
               </tr>
@@ -143,11 +130,11 @@ export default function CortesPage() {
                   <td className="px-5 py-4 font-semibold text-bone">{restaurant.name}</td>
                   <td className="px-5 py-4 text-bone/62">{restaurant.games}</td>
                   <td className="px-5 py-4 text-bone/62">{formatCurrency(restaurant.grossRevenue)}</td>
-                  <td className="px-5 py-4 text-agave">{formatCurrency(restaurant.commissionHL)}</td>
+                  <td className="px-5 py-4 text-agave">{formatCurrency(restaurant.hlFixedFee)}</td>
                   <td className="px-5 py-4 text-bone/62">
                     {formatCurrency(restaurant.commissionRestaurant)}
                   </td>
-                  <td className="px-5 py-4 text-mezcal">{formatCurrency(restaurant.commissionNet)}</td>
+                  <td className="px-5 py-4 text-mezcal">{formatCurrency(restaurant.restaurantNet)}</td>
                   <td className="px-5 py-4 text-bone/62">{formatCurrency(restaurant.prizes)}</td>
                   <td className="px-5 py-4 text-bone/62">
                     {formatDuration(restaurant.durationSeconds)}

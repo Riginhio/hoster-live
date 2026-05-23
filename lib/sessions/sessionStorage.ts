@@ -1,8 +1,9 @@
-import { loteriaCards, type LoteriaCard, type WinMode } from "@/lib/loteria";
+import { type LoteriaCard, type WinMode } from "@/lib/loteria";
 import { calculateFinancialBreakdown } from "@/lib/finance";
 import type { QrCampaign } from "@/lib/types";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import { getCardById, getDeckCards, normalizeDeckId, type DeckId } from "@/lib/decks";
 
 export type SessionStatus = "active" | "finalized";
 export type AutoplayStatus = "idle" | "countdown" | "playing" | "paused" | "finished";
@@ -12,13 +13,26 @@ export type Session = {
   batchId?: string;
   restaurantId: string;
   restaurantName: string;
+  operatorUserId?: string;
+  operatorUsername?: string;
+  operatorRole?: "manager" | "play";
   createdAt: string;
   startedAt: string;
   endedAt?: string;
   lastUpdatedAt: string;
   mode: WinMode;
+  deckId: DeckId;
   activeTables: number;
   tablePrice: number;
+  restaurantCommissionPercent: number;
+  restaurantCommissionAmount: number;
+  hlCommissionMode: "fixed" | "percent";
+  hlCommissionValue: number;
+  hlCommissionAmount: number;
+  commissionTotalPercent: number;
+  commissionTotalAmount: number;
+  hlFixedFee: number;
+  restaurantNetAmount: number;
   commissionPercent: number;
   commissionHLPercent: number;
   commissionRestaurantPercent: number;
@@ -91,24 +105,17 @@ function seededShuffle(cards: LoteriaCard[], seed: number) {
   return shuffled;
 }
 
-export function getSessionDeck(sessionId: string) {
-  return seededShuffle(loteriaCards, hashSeed(sessionId));
+export function getSessionDeck(sessionId: string, deckId?: string) {
+  return seededShuffle(getDeckCards(deckId), hashSeed(sessionId));
 }
 
-export function findSessionCard(cardId: string) {
-  return loteriaCards.find(
-    (card) =>
-      card.id === cardId ||
-      card.slug === cardId ||
-      `el-${card.slug}` === cardId ||
-      `la-${card.slug}` === cardId ||
-      `las-${card.slug}` === cardId,
-  );
+export function findSessionCard(cardId: string, deckId?: string) {
+  return getCardById(deckId, cardId) ?? getCardById("loteria", cardId);
 }
 
-export function hydrateSessionCards(cardIds: string[]) {
+export function hydrateSessionCards(cardIds: string[], deckId?: string) {
   return cardIds
-    .map((cardId) => findSessionCard(cardId))
+    .map((cardId) => findSessionCard(cardId, deckId))
     .filter((card): card is LoteriaCard => Boolean(card));
 }
 
@@ -144,9 +151,15 @@ function normalizeSession(session: Partial<Session>): Session {
     getRestaurantById(session.restaurantName ?? "") ??
     getRestaurantById(fallbackRestaurantId);
   const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(session.restaurantId, fallbackRestaurantId);
+  const deckId = normalizeDeckId(session.deckId ?? restaurant?.activeDeck);
   const breakdown = calculateFinancialBreakdown({
     activeTables: session.activeTables ?? 0,
     tablePrice: session.tablePrice ?? 0,
+    restaurantCommissionPercent: session.restaurantCommissionPercent,
+    hlCommissionMode: session.hlCommissionMode,
+    hlCommissionValue: session.hlCommissionValue,
+    hlFixedFee: session.hlFixedFee,
+    commissionHLAmount: session.commissionHLAmount,
     commissionHLPercent: session.commissionHLPercent,
     commissionRestaurantPercent: session.commissionRestaurantPercent,
     commissionPercent: session.commissionPercent,
@@ -157,13 +170,28 @@ function normalizeSession(session: Partial<Session>): Session {
     batchId: session.batchId,
     restaurantId,
     restaurantName: session.restaurantName ?? restaurant?.name ?? "Rancho Viejo",
+    operatorUserId: session.operatorUserId,
+    operatorUsername: session.operatorUsername,
+    operatorRole: session.operatorRole,
     createdAt: session.createdAt ?? new Date().toISOString(),
     startedAt: session.startedAt ?? session.createdAt ?? new Date().toISOString(),
     endedAt: session.endedAt,
     lastUpdatedAt: session.lastUpdatedAt ?? session.createdAt ?? new Date().toISOString(),
     mode: session.mode ?? "four_corners",
+    deckId,
     activeTables: session.activeTables ?? 0,
     tablePrice: session.tablePrice ?? 0,
+    restaurantCommissionPercent:
+      session.restaurantCommissionPercent ?? breakdown.restaurantCommissionPercent,
+    restaurantCommissionAmount:
+      session.restaurantCommissionAmount ?? breakdown.restaurantCommissionAmount,
+    hlCommissionMode: session.hlCommissionMode ?? breakdown.hlCommissionMode,
+    hlCommissionValue: session.hlCommissionValue ?? breakdown.hlCommissionValue,
+    hlCommissionAmount: session.hlCommissionAmount ?? breakdown.hlCommissionAmount,
+    commissionTotalPercent: session.commissionTotalPercent ?? breakdown.commissionTotalPercent,
+    commissionTotalAmount: session.commissionTotalAmount ?? breakdown.commissionTotalAmount,
+    hlFixedFee: session.hlFixedFee ?? breakdown.hlFixedFee,
+    restaurantNetAmount: session.restaurantNetAmount ?? breakdown.restaurantNetAmount,
     commissionPercent: session.commissionPercent ?? breakdown.commissionNetPercent,
     commissionHLPercent: session.commissionHLPercent ?? breakdown.commissionHLPercent,
     commissionRestaurantPercent:
@@ -222,12 +250,25 @@ export function createSession(
     Session,
     | "id"
     | "createdAt"
+    | "operatorUserId"
+    | "operatorUsername"
+    | "operatorRole"
     | "batchId"
     | "startedAt"
     | "endedAt"
     | "calledCards"
+    | "deckId"
     | "lastUpdatedAt"
     | "commissionHLPercent"
+    | "restaurantCommissionPercent"
+    | "restaurantCommissionAmount"
+    | "hlCommissionMode"
+    | "hlCommissionValue"
+    | "hlCommissionAmount"
+    | "commissionTotalPercent"
+    | "commissionTotalAmount"
+    | "hlFixedFee"
+    | "restaurantNetAmount"
     | "commissionRestaurantPercent"
     | "commissionNetPercent"
     | "commissionHLAmount"
@@ -252,11 +293,24 @@ export function createSession(
         Session,
         | "id"
         | "createdAt"
+        | "operatorUserId"
+        | "operatorUsername"
+        | "operatorRole"
         | "startedAt"
         | "batchId"
         | "calledCards"
+        | "deckId"
         | "lastUpdatedAt"
         | "commissionHLPercent"
+        | "restaurantCommissionPercent"
+        | "restaurantCommissionAmount"
+        | "hlCommissionMode"
+        | "hlCommissionValue"
+        | "hlCommissionAmount"
+        | "commissionTotalPercent"
+        | "commissionTotalAmount"
+        | "hlFixedFee"
+        | "restaurantNetAmount"
         | "commissionRestaurantPercent"
         | "commissionNetPercent"
         | "commissionHLAmount"
@@ -284,9 +338,15 @@ export function createSession(
     getRestaurantById(session.restaurantName) ??
     getRestaurantById("rancho-viejo");
   const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(session.restaurantId, "rancho-viejo");
+  const deckId = normalizeDeckId(session.deckId ?? restaurant?.activeDeck);
   const breakdown = calculateFinancialBreakdown({
     activeTables: session.activeTables,
     tablePrice: session.tablePrice,
+    restaurantCommissionPercent: session.restaurantCommissionPercent,
+    hlCommissionMode: session.hlCommissionMode,
+    hlCommissionValue: session.hlCommissionValue,
+    hlFixedFee: session.hlFixedFee,
+    commissionHLAmount: session.commissionHLAmount,
     commissionHLPercent: session.commissionHLPercent,
     commissionRestaurantPercent: session.commissionRestaurantPercent,
     commissionPercent: session.commissionPercent,
@@ -296,12 +356,27 @@ export function createSession(
     batchId: session.batchId,
     restaurantId,
     restaurantName: restaurant?.name ?? session.restaurantName,
+    operatorUserId: session.operatorUserId,
+    operatorUsername: session.operatorUsername,
+    operatorRole: session.operatorRole,
     createdAt: session.createdAt ?? now,
     startedAt: session.startedAt ?? now,
     lastUpdatedAt: session.lastUpdatedAt ?? now,
     mode: session.mode,
+    deckId,
     activeTables: session.activeTables,
     tablePrice: session.tablePrice,
+    restaurantCommissionPercent:
+      session.restaurantCommissionPercent ?? breakdown.restaurantCommissionPercent,
+    restaurantCommissionAmount:
+      session.restaurantCommissionAmount ?? breakdown.restaurantCommissionAmount,
+    hlCommissionMode: session.hlCommissionMode ?? breakdown.hlCommissionMode,
+    hlCommissionValue: session.hlCommissionValue ?? breakdown.hlCommissionValue,
+    hlCommissionAmount: session.hlCommissionAmount ?? breakdown.hlCommissionAmount,
+    commissionTotalPercent: session.commissionTotalPercent ?? breakdown.commissionTotalPercent,
+    commissionTotalAmount: session.commissionTotalAmount ?? breakdown.commissionTotalAmount,
+    hlFixedFee: session.hlFixedFee ?? breakdown.hlFixedFee,
+    restaurantNetAmount: session.restaurantNetAmount ?? breakdown.restaurantNetAmount,
     commissionPercent: session.commissionPercent ?? breakdown.commissionNetPercent,
     commissionHLPercent: session.commissionHLPercent ?? breakdown.commissionHLPercent,
     commissionRestaurantPercent:

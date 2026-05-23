@@ -93,7 +93,7 @@ export function BoardCard({
                 width={180}
                 height={285}
                 className={clsx(
-                  "h-full w-full object-cover transition duration-300",
+                  "h-full w-full bg-bone object-contain p-1 transition duration-300",
                   isMatched && "brightness-105 saturate-110",
                 )}
               />
@@ -101,6 +101,11 @@ export function BoardCard({
                 <p className="truncate text-[10px] font-bold leading-tight text-bone">
                   {card.name}
                 </p>
+                {card.confederation ? (
+                  <p className="truncate text-[8px] font-black uppercase tracking-[0.12em] text-mezcal">
+                    {card.confederation}
+                  </p>
+                ) : null}
               </div>
               {isMatched ? (
                 <div

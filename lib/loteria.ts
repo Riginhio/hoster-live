@@ -6,6 +6,9 @@ export type LoteriaCard = {
   slug: string;
   name: string;
   image: string;
+  confederation?: string;
+  isDebutant?: boolean;
+  qualificationType?: string;
 };
 
 export type LoteriaBoard = {

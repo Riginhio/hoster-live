@@ -1,42 +1,86 @@
 export type FinancialBreakdown = {
   grossRevenue: number;
+  restaurantCommissionPercent: number;
+  restaurantCommissionAmount: number;
+  hlCommissionMode: "fixed" | "percent";
+  hlCommissionValue: number;
+  hlCommissionAmount: number;
+  commissionTotalPercent: number;
+  commissionTotalAmount: number;
+  hlFixedFee: number;
+  prizeAmount: number;
+  restaurantNetAmount: number;
   commissionHLPercent: number;
   commissionRestaurantPercent: number;
   commissionNetPercent: number;
   commissionHLAmount: number;
   commissionRestaurantAmount: number;
   commissionNetAmount: number;
-  prizeAmount: number;
 };
 
 export function calculateFinancialBreakdown(input: {
   activeTables: number;
   tablePrice: number;
+  restaurantCommissionPercent?: number;
+  hlCommissionMode?: "fixed" | "percent";
+  hlCommissionValue?: number;
+  hlFixedFee?: number;
+  commissionHLAmount?: number;
   commissionHLPercent?: number;
   commissionRestaurantPercent?: number;
   commissionPercent?: number;
 }): FinancialBreakdown {
   const grossRevenue = input.activeTables * input.tablePrice;
-  const commissionHLPercent = Math.max(0, input.commissionHLPercent ?? 0);
-  const commissionRestaurantPercent = Math.max(
+  const restaurantCommissionPercent = Math.max(
     0,
-    input.commissionRestaurantPercent ?? input.commissionPercent ?? 0,
+    input.restaurantCommissionPercent ??
+      input.commissionRestaurantPercent ??
+      input.commissionPercent ??
+      0,
   );
-  const commissionNetPercent = Math.min(100, commissionHLPercent + commissionRestaurantPercent);
-  const commissionHLAmount = Math.round(grossRevenue * (commissionHLPercent / 100));
-  const commissionRestaurantAmount = Math.round(
-    grossRevenue * (commissionRestaurantPercent / 100),
+  const restaurantCommissionAmount = Math.round(
+    grossRevenue * (restaurantCommissionPercent / 100),
   );
-  const commissionNetAmount = commissionHLAmount + commissionRestaurantAmount;
+  const hlCommissionMode = input.hlCommissionMode ?? (input.hlFixedFee !== undefined ? "fixed" : "fixed");
+  const hlCommissionValue = Math.max(
+    0,
+    input.hlCommissionValue ?? input.hlFixedFee ?? input.commissionHLAmount ?? 0,
+  );
+  const hlCommissionAmount =
+    hlCommissionMode === "percent"
+      ? Math.round(grossRevenue * (hlCommissionValue / 100))
+      : Math.round(hlCommissionValue);
+  const commissionTotalPercent =
+    hlCommissionMode === "percent"
+      ? restaurantCommissionPercent + hlCommissionValue
+      : restaurantCommissionPercent;
+  const commissionTotalAmount =
+    hlCommissionMode === "percent"
+      ? restaurantCommissionAmount + hlCommissionAmount
+      : restaurantCommissionAmount;
+  const prizeAmount = Math.max(0, grossRevenue - commissionTotalAmount);
+  const restaurantNetAmount =
+    hlCommissionMode === "fixed"
+      ? Math.max(0, restaurantCommissionAmount - hlCommissionAmount)
+      : restaurantCommissionAmount;
 
   return {
     grossRevenue,
-    commissionHLPercent,
-    commissionRestaurantPercent,
-    commissionNetPercent,
-    commissionHLAmount,
-    commissionRestaurantAmount,
-    commissionNetAmount,
-    prizeAmount: Math.max(0, grossRevenue - commissionNetAmount),
+    restaurantCommissionPercent,
+    restaurantCommissionAmount,
+    hlCommissionMode,
+    hlCommissionValue,
+    hlCommissionAmount,
+    commissionTotalPercent,
+    commissionTotalAmount,
+    hlFixedFee: hlCommissionMode === "fixed" ? hlCommissionAmount : 0,
+    prizeAmount,
+    restaurantNetAmount,
+    commissionHLPercent: hlCommissionMode === "percent" ? hlCommissionValue : 0,
+    commissionRestaurantPercent: restaurantCommissionPercent,
+    commissionNetPercent: commissionTotalPercent,
+    commissionHLAmount: hlCommissionAmount,
+    commissionRestaurantAmount: restaurantCommissionAmount,
+    commissionNetAmount: commissionTotalAmount,
   };
 }

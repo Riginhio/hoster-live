@@ -3,6 +3,7 @@ import type { WinMode } from "@/lib/loteria";
 import type { Session } from "@/lib/sessions/sessionStorage";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import { normalizeDeckId } from "@/lib/decks";
 
 export type RealtimeGameSession = {
   id: string;
@@ -10,9 +11,19 @@ export type RealtimeGameSession = {
   restaurant_name: string;
   status: string;
   autoplay_status: string;
+  deck_id: string | null;
   mode: string;
   active_tables: number;
   table_price: number;
+  restaurant_commission_percent: number | null;
+  restaurant_commission_amount: number | null;
+  hl_commission_mode: "fixed" | "percent" | null;
+  hl_commission_value: number | null;
+  hl_commission_amount: number | null;
+  commission_total_percent: number | null;
+  commission_total_amount: number | null;
+  hl_fixed_fee: number | null;
+  restaurant_net_amount: number | null;
   gross_revenue: number;
   commission_hl_percent: number;
   commission_restaurant_percent: number;
@@ -31,6 +42,9 @@ export type RealtimeGameSession = {
   play_started_at: string | null;
   play_ended_at: string | null;
   active_promotions: Session["activePromotions"];
+  operator_user_id: string | null;
+  operator_username: string | null;
+  operator_role: "manager" | "play" | null;
   duration_seconds: number;
   last_updated_at: string;
   created_at: string;
@@ -74,6 +88,9 @@ type RealtimeSessionUpdate = Partial<
     | "playStartedAt"
     | "playEndedAt"
     | "activePromotions"
+    | "operatorUserId"
+    | "operatorUsername"
+    | "operatorRole"
     | "durationSeconds"
     | "lastUpdatedAt"
   >
@@ -88,9 +105,19 @@ function toRealtimePayload(session: Session) {
     restaurant_name: session.restaurantName,
     status: session.status,
     autoplay_status: session.autoplayStatus,
+    deck_id: session.deckId,
     mode: session.mode,
     active_tables: session.activeTables,
     table_price: session.tablePrice,
+    restaurant_commission_percent: session.restaurantCommissionPercent,
+    restaurant_commission_amount: session.restaurantCommissionAmount,
+    hl_commission_mode: session.hlCommissionMode,
+    hl_commission_value: session.hlCommissionValue,
+    hl_commission_amount: session.hlCommissionAmount,
+    commission_total_percent: session.commissionTotalPercent,
+    commission_total_amount: session.commissionTotalAmount,
+    hl_fixed_fee: session.hlFixedFee,
+    restaurant_net_amount: session.restaurantNetAmount,
     gross_revenue: session.grossRevenue,
     commission_hl_percent: session.commissionHLPercent,
     commission_restaurant_percent: session.commissionRestaurantPercent,
@@ -109,6 +136,9 @@ function toRealtimePayload(session: Session) {
     play_started_at: session.playStartedAt ?? null,
     play_ended_at: session.playEndedAt ?? null,
     active_promotions: session.activePromotions ?? [],
+    operator_user_id: session.operatorUserId ?? null,
+    operator_username: session.operatorUsername ?? null,
+    operator_role: session.operatorRole ?? null,
     duration_seconds: session.durationSeconds,
     last_updated_at: session.lastUpdatedAt,
     created_at: session.createdAt,
@@ -137,6 +167,13 @@ function toRealtimeUpdate(updates: RealtimeSessionUpdate) {
     ...(updates.playStartedAt !== undefined ? { play_started_at: updates.playStartedAt ?? null } : {}),
     ...(updates.playEndedAt !== undefined ? { play_ended_at: updates.playEndedAt ?? null } : {}),
     ...(updates.activePromotions ? { active_promotions: updates.activePromotions } : {}),
+    ...(updates.operatorUserId !== undefined
+      ? { operator_user_id: updates.operatorUserId ?? null }
+      : {}),
+    ...(updates.operatorUsername !== undefined
+      ? { operator_username: updates.operatorUsername ?? null }
+      : {}),
+    ...(updates.operatorRole !== undefined ? { operator_role: updates.operatorRole ?? null } : {}),
     ...(updates.durationSeconds !== undefined ? { duration_seconds: updates.durationSeconds } : {}),
     last_updated_at: updates.lastUpdatedAt ?? new Date().toISOString(),
   };
@@ -150,9 +187,24 @@ export function realtimeSessionToSession(row: RealtimeGameSession): Session {
     createdAt: row.created_at,
     startedAt: row.created_at,
     lastUpdatedAt: row.last_updated_at,
+    deckId: normalizeDeckId(row.deck_id ?? undefined),
     mode: row.mode as WinMode,
     activeTables: row.active_tables,
     tablePrice: row.table_price,
+    restaurantCommissionPercent:
+      row.restaurant_commission_percent ?? row.commission_restaurant_percent,
+    restaurantCommissionAmount:
+      row.restaurant_commission_amount ?? row.commission_restaurant_amount,
+    hlCommissionMode: row.hl_commission_mode ?? (row.hl_fixed_fee ? "fixed" : "percent"),
+    hlCommissionValue:
+      row.hl_commission_value ?? row.hl_fixed_fee ?? row.commission_hl_percent ?? 0,
+    hlCommissionAmount: row.hl_commission_amount ?? row.commission_hl_amount,
+    commissionTotalPercent: row.commission_total_percent ?? row.commission_net_percent,
+    commissionTotalAmount: row.commission_total_amount ?? row.commission_net_amount,
+    hlFixedFee: row.hl_fixed_fee ?? row.commission_hl_amount,
+    restaurantNetAmount:
+      row.restaurant_net_amount ??
+      Math.max(0, row.commission_restaurant_amount - row.commission_hl_amount),
     commissionPercent: row.commission_net_percent,
     commissionHLPercent: row.commission_hl_percent,
     commissionRestaurantPercent: row.commission_restaurant_percent,
@@ -173,6 +225,9 @@ export function realtimeSessionToSession(row: RealtimeGameSession): Session {
     playStartedAt: row.play_started_at ?? undefined,
     playEndedAt: row.play_ended_at ?? undefined,
     activePromotions: row.active_promotions ?? [],
+    operatorUserId: row.operator_user_id ?? undefined,
+    operatorUsername: row.operator_username ?? undefined,
+    operatorRole: row.operator_role ?? undefined,
     status: row.status as Session["status"],
     durationSeconds: row.duration_seconds ?? 0,
   };

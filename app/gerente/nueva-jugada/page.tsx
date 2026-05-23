@@ -23,6 +23,7 @@ import { saveLastGameConfig } from "@/lib/sessions/lastGameConfigStorage";
 import { getActiveBoardBatch } from "@/lib/boards/boardBatchStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
 import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
+import type { DeckId } from "@/lib/decks";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -30,6 +31,9 @@ const modeLabels: Record<WinMode, string> = {
   center_four: "4 centrales",
   full_card: "Llena",
 };
+const specialTableOptions = [60, 80, 100];
+const specialPriceOptions = [300, 500, 1000];
+const specialModeOptions: WinMode[] = ["four_corners", "center_four", "x_shape", "full_card"];
 
 export default function NuevaJugadaPage() {
   const { currentUser } = useAuth();
@@ -39,6 +43,8 @@ export default function NuevaJugadaPage() {
   const [savedConfig, setSavedConfig] = useState<DemoGameConfig | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [selectedDeckId, setSelectedDeckId] = useState<DeckId>("loteria");
+  const isPlay = currentUser?.venueRole === "play";
 
   const selectedRestaurant = useMemo(
     () => restaurants.find((restaurant) => restaurant.id === config.restaurantId) ?? restaurants[0],
@@ -67,6 +73,7 @@ export default function NuevaJugadaPage() {
           ? createDefaultDemoConfig(managerRestaurant.id)
           : loadedConfig,
       );
+      setSelectedDeckId(managerRestaurant?.enabledDecks[0] ?? managerRestaurant?.activeDeck ?? "loteria");
     } catch {
       setRestaurants(getRestaurants());
       setConfig(createDefaultDemoConfig(currentUser?.restaurantId));
@@ -76,10 +83,64 @@ export default function NuevaJugadaPage() {
   const financialBreakdown = calculateFinancialBreakdown({
     activeTables: config.activeTables,
     tablePrice: config.tablePrice,
-    commissionHLPercent: selectedRestaurant.commissionHLPercent,
-    commissionRestaurantPercent: selectedRestaurant.commissionRestaurantPercent,
+    restaurantCommissionPercent: selectedRestaurant.restaurantCommissionPercent,
+    hlCommissionMode: selectedRestaurant.hlCommissionMode,
+    hlCommissionValue: selectedRestaurant.hlCommissionValue,
+    hlFixedFee: selectedRestaurant.hlFixedFee,
   });
   const calculatedPrize = financialBreakdown.prizeAmount;
+  const availableSpecialTables = useMemo(
+    () =>
+      specialTableOptions.filter((option) => selectedRestaurant.allowedTableCounts.includes(option)),
+    [selectedRestaurant.allowedTableCounts],
+  );
+  const availableSpecialPrices = useMemo(
+    () => specialPriceOptions.filter((price) => selectedRestaurant.allowedPrices.includes(price)),
+    [selectedRestaurant.allowedPrices],
+  );
+  const availableSpecialModes = useMemo(
+    () => specialModeOptions.filter((mode) => selectedRestaurant.allowedModes.includes(mode)),
+    [selectedRestaurant.allowedModes],
+  );
+
+  useEffect(() => {
+    if (!selectedRestaurant.enabledDecks.includes(selectedDeckId)) {
+      setSelectedDeckId(selectedRestaurant.enabledDecks[0] ?? selectedRestaurant.activeDeck);
+    }
+  }, [selectedDeckId, selectedRestaurant.activeDeck, selectedRestaurant.enabledDecks]);
+
+  useEffect(() => {
+    const nextActiveTables = availableSpecialTables.includes(config.activeTables)
+      ? config.activeTables
+      : availableSpecialTables[0] ?? specialTableOptions[0];
+    const nextTablePrice = availableSpecialPrices.includes(config.tablePrice)
+      ? config.tablePrice
+      : availableSpecialPrices[0] ?? specialPriceOptions[0];
+    const nextMode = availableSpecialModes.includes(config.mode)
+      ? config.mode
+      : availableSpecialModes[0] ?? specialModeOptions[0];
+
+    if (
+      nextActiveTables !== config.activeTables ||
+      nextTablePrice !== config.tablePrice ||
+      nextMode !== config.mode
+    ) {
+      updateConfig({
+        activeTables: nextActiveTables,
+        tablePrice: nextTablePrice,
+        mode: nextMode,
+      });
+    }
+    // updateConfig derives from the current restaurant/config state; the guarded setters above prevent loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    availableSpecialModes,
+    availableSpecialPrices,
+    availableSpecialTables,
+    config.activeTables,
+    config.mode,
+    config.tablePrice,
+  ]);
 
   function updateConfig(partialConfig: Partial<DemoGameConfig>) {
     setSavedConfig(null);
@@ -89,29 +150,48 @@ export default function NuevaJugadaPage() {
         restaurants.find((item) => item.id === nextRestaurantId) ?? restaurants[0];
 
       if (nextRestaurantId !== currentConfig.restaurantId) {
+        const nextActiveTables =
+          specialTableOptions.find((option) => restaurant.allowedTableCounts.includes(option)) ??
+          specialTableOptions[0];
+        const nextTablePrice =
+          specialPriceOptions.find((price) => restaurant.allowedPrices.includes(price)) ??
+          specialPriceOptions[0];
+        const nextMode =
+          specialModeOptions.find((mode) => restaurant.allowedModes.includes(mode)) ??
+          specialModeOptions[0];
+        setSelectedDeckId(restaurant.enabledDecks[0] ?? restaurant.activeDeck);
+
         return {
           ...createDefaultDemoConfig(restaurant.id),
-          mode: restaurant.allowedModes[0],
-          tablePrice: restaurant.allowedPrices[0] ?? 100,
-          activeTables: restaurant.allowedTableCounts[0] ?? 20,
-          commissionPercent: restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent,
+          mode: nextMode,
+          tablePrice: nextTablePrice,
+          activeTables: nextActiveTables,
+          commissionPercent: restaurant.restaurantCommissionPercent,
+          restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+          hlCommissionMode: restaurant.hlCommissionMode,
+          hlCommissionValue: restaurant.hlCommissionValue,
+          hlFixedFee: restaurant.hlFixedFee,
           calculatedPrize: calculateFinancialBreakdown({
-            activeTables: restaurant.allowedTableCounts[0] ?? 20,
-            tablePrice: restaurant.allowedPrices[0] ?? 100,
-            commissionHLPercent: restaurant.commissionHLPercent,
-            commissionRestaurantPercent: restaurant.commissionRestaurantPercent,
+            activeTables: nextActiveTables,
+            tablePrice: nextTablePrice,
+            restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+            hlCommissionMode: restaurant.hlCommissionMode,
+            hlCommissionValue: restaurant.hlCommissionValue,
+            hlFixedFee: restaurant.hlFixedFee,
           }).prizeAmount,
         };
       }
 
       const activeTables = partialConfig.activeTables ?? currentConfig.activeTables;
       const tablePrice = partialConfig.tablePrice ?? currentConfig.tablePrice;
-      const commissionPercent = restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
+      const commissionPercent = restaurant.restaurantCommissionPercent;
       const breakdown = calculateFinancialBreakdown({
         activeTables,
         tablePrice,
-        commissionHLPercent: restaurant.commissionHLPercent,
-        commissionRestaurantPercent: restaurant.commissionRestaurantPercent,
+        restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+        hlCommissionMode: restaurant.hlCommissionMode,
+        hlCommissionValue: restaurant.hlCommissionValue,
+        hlFixedFee: restaurant.hlFixedFee,
       });
 
       return {
@@ -121,6 +201,8 @@ export default function NuevaJugadaPage() {
         activeTables,
         tablePrice,
         commissionPercent,
+        restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+        hlFixedFee: restaurant.hlFixedFee,
         calculatedPrize: breakdown.prizeAmount,
       };
     });
@@ -129,10 +211,18 @@ export default function NuevaJugadaPage() {
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (isPlay) {
+      setFormError("Tu usuario Play solo puede iniciar jugadas normales.");
+      return;
+    }
+
     const nextConfig: DemoGameConfig = {
       ...config,
-      commissionPercent:
-        selectedRestaurant.commissionHLPercent + selectedRestaurant.commissionRestaurantPercent,
+      commissionPercent: selectedRestaurant.restaurantCommissionPercent,
+      restaurantCommissionPercent: selectedRestaurant.restaurantCommissionPercent,
+      hlCommissionMode: selectedRestaurant.hlCommissionMode,
+      hlCommissionValue: selectedRestaurant.hlCommissionValue,
+      hlFixedFee: selectedRestaurant.hlFixedFee,
       calculatedPrize,
       createdAt: new Date().toISOString(),
     };
@@ -157,11 +247,21 @@ export default function NuevaJugadaPage() {
         restaurantId: selectedRestaurant.id,
         restaurantName: selectedRestaurant.name,
         mode: nextConfig.mode,
+        deckId: selectedDeckId,
         activeTables: nextConfig.activeTables,
         tablePrice: nextConfig.tablePrice,
+        restaurantCommissionPercent: selectedRestaurant.restaurantCommissionPercent,
+        restaurantCommissionAmount: financialBreakdown.restaurantCommissionAmount,
+        hlCommissionMode: financialBreakdown.hlCommissionMode,
+        hlCommissionValue: financialBreakdown.hlCommissionValue,
+        hlCommissionAmount: financialBreakdown.hlCommissionAmount,
+        commissionTotalPercent: financialBreakdown.commissionTotalPercent,
+        commissionTotalAmount: financialBreakdown.commissionTotalAmount,
+        hlFixedFee: financialBreakdown.hlFixedFee,
+        restaurantNetAmount: financialBreakdown.restaurantNetAmount,
         commissionPercent: nextConfig.commissionPercent,
-        commissionHLPercent: selectedRestaurant.commissionHLPercent,
-        commissionRestaurantPercent: selectedRestaurant.commissionRestaurantPercent,
+        commissionHLPercent: financialBreakdown.commissionHLPercent,
+        commissionRestaurantPercent: selectedRestaurant.restaurantCommissionPercent,
         commissionNetPercent: financialBreakdown.commissionNetPercent,
         commissionHLAmount: financialBreakdown.commissionHLAmount,
         commissionRestaurantAmount: financialBreakdown.commissionRestaurantAmount,
@@ -172,6 +272,9 @@ export default function NuevaJugadaPage() {
         autoplayIntervalSeconds: 5,
         preStartCountdownSeconds: 60,
         activePromotions: getActiveQrCampaignsForRestaurant(selectedRestaurant.id),
+        operatorUserId: currentUser?.userId,
+        operatorUsername: currentUser?.email ?? currentUser?.name,
+        operatorRole: currentUser?.venueRole ?? "manager",
       });
       void createRealtimeSession(createdSession);
       saveLastGameConfig(selectedRestaurant.id, {
@@ -192,6 +295,15 @@ export default function NuevaJugadaPage() {
 
   return (
     <Layout title="Jugada especial" eyebrow="Gerente">
+      {isPlay ? (
+        <Card accent className="border-chile/35 bg-chile/10">
+          <h2 className="font-display text-3xl text-bone">Jugada especial no disponible</h2>
+          <p className="mt-2 text-sm text-bone/60">
+            Tu usuario Play solo puede lanzar jugadas normales desde Inicio.
+          </p>
+        </Card>
+      ) : (
+      <>
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <Card>
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -252,12 +364,34 @@ export default function NuevaJugadaPage() {
               </select>
             </label>
 
+            {selectedRestaurant.enabledDecks.length > 1 ? (
+              <fieldset>
+                <legend className="mb-2 block text-sm font-semibold text-bone/70">Deck</legend>
+                <div className="grid grid-cols-2 gap-3">
+                  {selectedRestaurant.enabledDecks.map((deckId) => (
+                    <button
+                      key={deckId}
+                      type="button"
+                      onClick={() => setSelectedDeckId(deckId)}
+                      className={`h-12 rounded-lg border px-4 text-sm font-black transition ${
+                        selectedDeckId === deckId
+                          ? "border-mezcal bg-mezcal text-obsidian shadow-glow"
+                          : "border-bone/10 bg-bone/[0.04] text-bone hover:bg-bone/10"
+                      }`}
+                    >
+                      {deckId === "worldcup2026" ? "FIFA 2026" : "Loteria"}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            ) : null}
+
             <fieldset>
               <legend className="mb-2 block text-sm font-semibold text-bone/70">
                 Tablas activas
               </legend>
               <div className="grid grid-cols-3 gap-3">
-                {selectedRestaurant.allowedTableCounts.map((option) => (
+                {availableSpecialTables.map((option) => (
                   <button
                     key={option}
                     type="button"
@@ -292,7 +426,7 @@ export default function NuevaJugadaPage() {
             <fieldset>
               <legend className="mb-2 block text-sm font-semibold text-bone/70">Modalidad</legend>
               <div className="grid gap-3 md:grid-cols-3">
-                {selectedRestaurant.allowedModes.map((option) => (
+                {availableSpecialModes.map((option) => (
                   <button
                     key={option}
                     type="button"
@@ -314,7 +448,7 @@ export default function NuevaJugadaPage() {
                 Costo por tabla
               </legend>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                {selectedRestaurant.allowedPrices.map((price) => (
+                {availableSpecialPrices.map((price) => (
                   <button
                     key={price}
                     type="button"
@@ -398,23 +532,31 @@ export default function NuevaJugadaPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-bone/45">Comision HL</dt>
+              <dt className="text-bone/45">Fee HL</dt>
               <dd className="mt-1 font-semibold text-bone">
-                {financialBreakdown.commissionHLPercent}% - ${financialBreakdown.commissionHLAmount}
+                {financialBreakdown.hlCommissionMode === "percent"
+                  ? `${financialBreakdown.hlCommissionValue}% - $${financialBreakdown.hlCommissionAmount}`
+                  : `$${financialBreakdown.hlCommissionAmount}`}
               </dd>
             </div>
             <div>
               <dt className="text-bone/45">Comision restaurante</dt>
               <dd className="mt-1 font-semibold text-bone">
-                {financialBreakdown.commissionRestaurantPercent}% - $
-                {financialBreakdown.commissionRestaurantAmount}
+                {financialBreakdown.restaurantCommissionPercent}% - $
+                {financialBreakdown.restaurantCommissionAmount}
               </dd>
             </div>
             <div>
-              <dt className="text-bone/45">Comision neta</dt>
+              <dt className="text-bone/45">Comision total</dt>
               <dd className="mt-1 font-semibold text-bone">
-                {financialBreakdown.commissionNetPercent}% - $
-                {financialBreakdown.commissionNetAmount}
+                {financialBreakdown.commissionTotalPercent}% - $
+                {financialBreakdown.commissionTotalAmount}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-bone/45">Restaurante neto</dt>
+              <dd className="mt-1 font-semibold text-bone">
+                ${financialBreakdown.restaurantNetAmount}
               </dd>
             </div>
             <div>
@@ -424,6 +566,8 @@ export default function NuevaJugadaPage() {
           </dl>
         </Card>
       </div>
+      </>
+      )}
     </Layout>
   );
 }

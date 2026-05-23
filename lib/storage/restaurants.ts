@@ -1,5 +1,6 @@
 import type { BusinessType, RestaurantConfig } from "@/lib/types";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import { normalizeDeckId, type GameId } from "@/lib/decks";
 
 export const restaurantsStorageKey = "loteria:restaurants";
 
@@ -24,8 +25,14 @@ export const demoRestaurant: RestaurantConfig = {
   averageHostesses: 6,
   strongDays: ["jueves", "viernes", "sabado"],
   estimatedGamesPerWeek: 9,
-  audienceType: "Adultos 28-45, grupos despues de oficina y celebraciones.",
+  audienceType: ["Adultos 30 a 45"],
+  audienceNotes: "Grupos despues de oficina y celebraciones.",
   notes: "Cuenta con buena respuesta en noches de musica regional y promociones por mesa.",
+  restaurantCommissionPercent: 30,
+  hlCommissionMode: "fixed",
+  hlCommissionValue: 300,
+  hlFixedFee: 300,
+  activeDeck: "loteria",
   commissionPercent: 20,
   commissionHLPercent: 0,
   commissionRestaurantPercent: 20,
@@ -33,6 +40,8 @@ export const demoRestaurant: RestaurantConfig = {
   allowedPrices: [50, 100, 150, 200, 300],
   allowedModes: ["four_corners", "x_shape", "center_four", "full_card"],
   enabledGames: ["loteria"],
+  activeGames: ["loteria"],
+  enabledDecks: ["loteria", "worldcup2026"],
   primaryColor: "#d9a441",
   secondaryColor: "#1fa187",
   accentColor: "#c0392b",
@@ -83,8 +92,14 @@ export const doroteoRestaurant: RestaurantConfig = {
   averageHostesses: 10,
   strongDays: ["viernes", "sabado"],
   estimatedGamesPerWeek: 6,
-  audienceType: "Joven adulto 23-35, alto consumo en fin de semana.",
+  audienceType: ["Jovenes"],
+  audienceNotes: "Alto consumo en fin de semana.",
   notes: "Perfil ideal para activaciones cortas antes del pico de DJ.",
+  restaurantCommissionPercent: 30,
+  hlCommissionMode: "fixed",
+  hlCommissionValue: 300,
+  hlFixedFee: 300,
+  activeDeck: "loteria",
   commissionPercent: 25,
   commissionHLPercent: 0,
   commissionRestaurantPercent: 25,
@@ -92,6 +107,8 @@ export const doroteoRestaurant: RestaurantConfig = {
   allowedPrices: [100, 150, 200, 300],
   allowedModes: ["four_corners", "x_shape", "full_card"],
   enabledGames: ["loteria"],
+  activeGames: ["loteria"],
+  enabledDecks: ["loteria", "worldcup2026"],
   primaryColor: "#1fa187",
   secondaryColor: "#c0392b",
   accentColor: "#d9a441",
@@ -156,6 +173,22 @@ function normalizeStringArray(value: unknown, fallback: string[] = []) {
     : fallback;
 }
 
+function normalizeAudienceTypes(value: unknown, fallback: string[] = ["Mixto / general"]) {
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return value.length > 0 ? value : fallback;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim()];
+  }
+
+  return fallback;
+}
+
+function normalizeGameIds(value: unknown, fallback: GameId[] = ["loteria"]): GameId[] {
+  return Array.isArray(value) && value.includes("loteria") ? ["loteria"] : fallback;
+}
+
 function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig {
   const requestedSlug = normalizeRestaurantSlug(value.slug ?? value.id ?? value.name, demoRestaurant.slug);
   const fallback = fallbackById.get(requestedSlug) ?? fallbackById.get(value.id ?? "") ?? demoRestaurant;
@@ -166,6 +199,17 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
     value.commissionRestaurantPercent,
     normalizeNumber(value.commissionPercent, fallback.commissionRestaurantPercent),
   );
+  const restaurantCommissionPercent = normalizeNumber(
+    value.restaurantCommissionPercent,
+    commissionRestaurantPercent,
+  );
+  const legacyCommissionHLAmount = (value as Partial<RestaurantConfig> & { commissionHLAmount?: number }).commissionHLAmount;
+  const hlFixedFee = normalizeNumber(
+    value.hlFixedFee,
+    normalizeNumber(legacyCommissionHLAmount, fallback.hlFixedFee),
+  );
+  const hlCommissionMode = value.hlCommissionMode === "percent" ? "percent" : "fixed";
+  const hlCommissionValue = normalizeNumber(value.hlCommissionValue, hlFixedFee);
   const commissionNetPercent = commissionHLPercent + commissionRestaurantPercent;
 
   return {
@@ -192,17 +236,30 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
       value.estimatedGamesPerWeek,
       fallback.estimatedGamesPerWeek,
     ),
-    audienceType: normalizeText(value.audienceType, fallback.audienceType),
+    audienceType: normalizeAudienceTypes(value.audienceType, fallback.audienceType),
+    audienceNotes: normalizeText(value.audienceNotes, fallback.audienceNotes),
     notes: normalizeText(value.notes, fallback.notes),
+    restaurantCommissionPercent,
+    hlCommissionMode,
+    hlCommissionValue,
+    hlFixedFee,
+    activeDeck: normalizeDeckId(value.activeDeck),
     commissionPercent: commissionNetPercent,
     commissionHLPercent,
-    commissionRestaurantPercent,
+    commissionRestaurantPercent: restaurantCommissionPercent,
     allowedTableCounts: value.allowedTableCounts?.length
       ? value.allowedTableCounts
       : fallback.allowedTableCounts,
     allowedPrices: value.allowedPrices?.length ? value.allowedPrices : fallback.allowedPrices,
     allowedModes: value.allowedModes?.length ? value.allowedModes : fallback.allowedModes,
     enabledGames: value.enabledGames?.length ? value.enabledGames : fallback.enabledGames,
+    activeGames: normalizeGameIds(value.activeGames ?? value.enabledGames, fallback.activeGames),
+    enabledDecks:
+      value.enabledDecks?.length
+        ? value.enabledDecks.map(normalizeDeckId)
+        : [normalizeDeckId(value.activeDeck), ...(fallback.enabledDecks ?? [])].filter(
+            (deckId, index, decks) => decks.indexOf(deckId) === index,
+          ),
     primaryColor: normalizeText(
       value.primaryColor,
       value.theme?.primaryColor ?? fallback.primaryColor,

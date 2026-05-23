@@ -7,6 +7,7 @@ import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import type { WinMode } from "@/lib/loteria";
+import type { DeckId, GameId } from "@/lib/decks";
 import type { BusinessType, RestaurantConfig } from "@/lib/types";
 import {
   createRestaurant,
@@ -31,13 +32,14 @@ type RestaurantFormState = {
   instagramUrl: string;
   facebookUrl: string;
   tiktokUrl: string;
-  averageHostesses: string;
   strongDays: string[];
-  estimatedGamesPerWeek: string;
-  audienceType: string;
+  audienceType: string[];
+  audienceNotes: string;
   notes: string;
-  commissionHLPercent: string;
-  commissionRestaurantPercent: string;
+  restaurantCommissionPercent: string;
+  hlCommissionMode: "fixed" | "percent";
+  hlCommissionValue: string;
+  activeDeck: DeckId;
   primaryColor: string;
   secondaryColor: string;
   accentColor: string;
@@ -64,7 +66,9 @@ type RestaurantFormState = {
   allowedPrices: number[];
   allowedModes: WinMode[];
   allowedTableCounts: number[];
-  enabledGames: string[];
+  enabledGames: GameId[];
+  activeGames: GameId[];
+  enabledDecks: DeckId[];
 };
 
 const businessTypeOptions: Array<{ value: BusinessType; label: string }> = [
@@ -77,10 +81,22 @@ const businessTypeOptions: Array<{ value: BusinessType; label: string }> = [
   { value: "activacion_temporal", label: "Activacion temporal" },
   { value: "otro", label: "Otro" },
 ];
-const gameOptions = ["loteria"];
-const priceOptions = [50, 100, 150, 200, 250, 300, 400, 500];
-const tableOptions = [10, 20, 30, 40, 50, 75, 100];
+const activeGameOptions: GameId[] = ["loteria"];
+const deckOptions: DeckId[] = ["loteria", "worldcup2026"];
+const priceOptions = [50, 100, 150, 200, 250, 300, 500, 1000];
+const tableOptions = [10, 20, 30, 40, 50, 60, 80, 100];
 const dayOptions = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
+const audienceTypeOptions = [
+  "Familiar infantil",
+  "Familiar juvenil",
+  "Jovenes",
+  "Adultos 30 a 45",
+  "Adultos 46 a 60",
+  "NSE medio",
+  "NSE medio alto",
+  "NSE alto",
+  "Mixto / general",
+];
 const modeOptions: Array<{ value: WinMode; label: string }> = [
   { value: "four_corners", label: "4 esquinas" },
   { value: "x_shape", label: "Figura X" },
@@ -108,13 +124,14 @@ const emptyForm: RestaurantFormState = {
   instagramUrl: "",
   facebookUrl: "",
   tiktokUrl: "",
-  averageHostesses: "4",
   strongDays: ["viernes", "sabado"],
-  estimatedGamesPerWeek: "4",
-  audienceType: "",
+  audienceType: ["Mixto / general"],
+  audienceNotes: "",
   notes: "",
-  commissionHLPercent: "0",
-  commissionRestaurantPercent: "20",
+  restaurantCommissionPercent: "30",
+  hlCommissionMode: "fixed",
+  hlCommissionValue: "300",
+  activeDeck: "loteria",
   primaryColor: "#d9a441",
   secondaryColor: "#1fa187",
   accentColor: "#c0392b",
@@ -142,6 +159,8 @@ const emptyForm: RestaurantFormState = {
   allowedModes: ["four_corners"],
   allowedTableCounts: [20, 30, 50],
   enabledGames: ["loteria"],
+  activeGames: ["loteria"],
+  enabledDecks: ["loteria", "worldcup2026"],
 };
 
 function formatCurrency(value: number) {
@@ -157,7 +176,11 @@ function getBusinessTypeLabel(value: BusinessType) {
 }
 
 function getGameLabel(value: string) {
-  return value === "loteria" ? "Hoster Game" : value;
+  if (value === "loteria") {
+    return "Loteria";
+  }
+
+  return value === "worldcup2026" || value === "fifa2026" ? "FIFA 2026" : value;
 }
 
 function toggleNumberValue(values: number[], value: number) {
@@ -194,13 +217,14 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     instagramUrl: restaurant.instagramUrl,
     facebookUrl: restaurant.facebookUrl,
     tiktokUrl: restaurant.tiktokUrl,
-    averageHostesses: String(restaurant.averageHostesses),
     strongDays: restaurant.strongDays,
-    estimatedGamesPerWeek: String(restaurant.estimatedGamesPerWeek),
     audienceType: restaurant.audienceType,
+    audienceNotes: restaurant.audienceNotes,
     notes: restaurant.notes,
-    commissionHLPercent: String(restaurant.commissionHLPercent),
-    commissionRestaurantPercent: String(restaurant.commissionRestaurantPercent),
+    restaurantCommissionPercent: String(restaurant.restaurantCommissionPercent),
+    hlCommissionMode: restaurant.hlCommissionMode,
+    hlCommissionValue: String(restaurant.hlCommissionValue),
+    activeDeck: restaurant.activeDeck,
     primaryColor: restaurant.primaryColor,
     secondaryColor: restaurant.secondaryColor,
     accentColor: restaurant.accentColor,
@@ -227,31 +251,34 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     allowedPrices: restaurant.allowedPrices,
     allowedModes: restaurant.allowedModes,
     allowedTableCounts: restaurant.allowedTableCounts,
-    enabledGames: restaurant.enabledGames,
+    enabledGames: restaurant.activeGames,
+    activeGames: restaurant.activeGames,
+    enabledDecks: restaurant.enabledDecks,
   };
 }
 
 function validateForm(formState: RestaurantFormState) {
-  const commissionHLPercent = Number(formState.commissionHLPercent);
-  const commissionRestaurantPercent = Number(formState.commissionRestaurantPercent);
-  const commissionNetPercent = commissionHLPercent + commissionRestaurantPercent;
-  const averageHostesses = Number(formState.averageHostesses);
-  const estimatedGamesPerWeek = Number(formState.estimatedGamesPerWeek);
+  const restaurantCommissionPercent = Number(formState.restaurantCommissionPercent);
+  const hlCommissionValue = Number(formState.hlCommissionValue);
 
   if (!formState.name.trim()) {
     return "El nombre del restaurante es obligatorio.";
   }
 
-  if (!Number.isFinite(commissionHLPercent) || commissionHLPercent < 0) {
-    return "La comision HOSTER LIVE no puede ser menor a 0%.";
-  }
-
-  if (!Number.isFinite(commissionRestaurantPercent) || commissionRestaurantPercent < 0) {
+  if (!Number.isFinite(restaurantCommissionPercent) || restaurantCommissionPercent < 0) {
     return "La comision del restaurante no puede ser menor a 0%.";
   }
 
-  if (commissionNetPercent > 100) {
-    return "La comision neta no puede ser mayor a 100%.";
+  if (restaurantCommissionPercent > 100) {
+    return "La comision del restaurante no puede ser mayor a 100%.";
+  }
+
+  if (!Number.isFinite(hlCommissionValue) || hlCommissionValue < 0) {
+    return "La comision HL debe ser un valor valido.";
+  }
+
+  if (formState.hlCommissionMode === "percent" && hlCommissionValue > 100) {
+    return "La comision HL porcentual no puede ser mayor a 100%.";
   }
 
   if (formState.allowedPrices.length === 0) {
@@ -270,16 +297,12 @@ function validateForm(formState: RestaurantFormState) {
     return "Selecciona al menos una cantidad de tablas.";
   }
 
-  if (formState.enabledGames.length === 0) {
-    return "Selecciona al menos un juego habilitado.";
+  if (formState.activeGames.length === 0) {
+    return "Selecciona al menos un juego activo.";
   }
 
-  if (!Number.isFinite(averageHostesses) || averageHostesses < 0) {
-    return "El promedio de hostesses debe ser un numero valido.";
-  }
-
-  if (!Number.isFinite(estimatedGamesPerWeek) || estimatedGamesPerWeek < 0) {
-    return "Las jugadas estimadas por semana deben ser un numero valido.";
+  if (formState.enabledDecks.length === 0) {
+    return "Selecciona al menos un deck disponible.";
   }
 
   return undefined;
@@ -332,6 +355,19 @@ export default function RestaurantesPage() {
     setRestaurants(getRestaurants());
   }, []);
 
+  useEffect(() => {
+    if (!isFormOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isFormOpen]);
+
   const filteredRestaurants = useMemo(() => {
     const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
@@ -342,7 +378,9 @@ export default function RestaurantesPage() {
         statusFilter === "all" ||
         (statusFilter === "active" ? restaurant.active : !restaurant.active);
       const matchesGame =
-        gameFilter === "all" || restaurant.enabledGames.some((game) => game === gameFilter);
+        gameFilter === "all" ||
+        restaurant.activeGames.some((game) => game === gameFilter) ||
+        restaurant.enabledDecks.some((deck) => deck === gameFilter);
       const matchesSearch =
         normalizedSearchTerm.length === 0 ||
         restaurant.name.toLowerCase().includes(normalizedSearchTerm) ||
@@ -364,7 +402,7 @@ export default function RestaurantesPage() {
     }
 
     const totalCommission = restaurants.reduce(
-      (total, restaurant) => total + restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent,
+      (total, restaurant) => total + restaurant.restaurantCommissionPercent,
       0,
     );
 
@@ -405,6 +443,16 @@ export default function RestaurantesPage() {
       return;
     }
 
+    const normalizedActiveGames: GameId[] = formState.activeGames.includes("loteria")
+      ? ["loteria"]
+      : [];
+    const normalizedEnabledDecks = formState.enabledDecks.length
+      ? formState.enabledDecks
+      : (["loteria"] as DeckId[]);
+    const normalizedActiveDeck = normalizedEnabledDecks.includes(formState.activeDeck)
+      ? formState.activeDeck
+      : normalizedEnabledDecks[0];
+
     const payload = {
       name: formState.name.trim(),
       slug: normalizeRestaurantSlug(formState.slug || formState.name),
@@ -420,15 +468,22 @@ export default function RestaurantesPage() {
       instagramUrl: formState.instagramUrl.trim(),
       facebookUrl: formState.facebookUrl.trim(),
       tiktokUrl: formState.tiktokUrl.trim(),
-      averageHostesses: Number(formState.averageHostesses),
       strongDays: formState.strongDays,
-      estimatedGamesPerWeek: Number(formState.estimatedGamesPerWeek),
-      audienceType: formState.audienceType.trim(),
+      averageHostesses: 0,
+      estimatedGamesPerWeek: 0,
+      audienceType: formState.audienceType,
+      audienceNotes: formState.audienceNotes.trim(),
       notes: formState.notes.trim(),
-      commissionHLPercent: Number(formState.commissionHLPercent),
-      commissionRestaurantPercent: Number(formState.commissionRestaurantPercent),
-      commissionPercent:
-        Number(formState.commissionHLPercent) + Number(formState.commissionRestaurantPercent),
+      restaurantCommissionPercent: Number(formState.restaurantCommissionPercent),
+      hlCommissionMode: formState.hlCommissionMode,
+      hlCommissionValue: Number(formState.hlCommissionValue),
+      hlFixedFee:
+        formState.hlCommissionMode === "fixed" ? Number(formState.hlCommissionValue) : 0,
+      activeDeck: normalizedActiveDeck,
+      commissionHLPercent:
+        formState.hlCommissionMode === "percent" ? Number(formState.hlCommissionValue) : 0,
+      commissionRestaurantPercent: Number(formState.restaurantCommissionPercent),
+      commissionPercent: Number(formState.restaurantCommissionPercent),
       primaryColor: formState.primaryColor,
       secondaryColor: formState.secondaryColor,
       accentColor: formState.accentColor,
@@ -455,7 +510,9 @@ export default function RestaurantesPage() {
       allowedPrices: formState.allowedPrices,
       allowedModes: formState.allowedModes,
       allowedTableCounts: formState.allowedTableCounts,
-      enabledGames: formState.enabledGames,
+      enabledGames: normalizedActiveGames,
+      activeGames: normalizedActiveGames,
+      enabledDecks: normalizedEnabledDecks,
       theme: {
         primaryColor: formState.primaryColor,
         secondaryColor: formState.secondaryColor,
@@ -560,7 +617,7 @@ export default function RestaurantesPage() {
             className={inputClassName}
           >
             <option value="all">Todos los juegos</option>
-            {gameOptions.map((game) => (
+            {[...activeGameOptions, ...deckOptions.filter((deck) => deck !== "loteria")].map((game) => (
               <option key={game} value={game}>
                 {getGameLabel(game)}
               </option>
@@ -606,9 +663,7 @@ export default function RestaurantesPage() {
                       />
                       <div>
                         <p className="font-semibold text-bone">{restaurant.name}</p>
-                        <p className="mt-1 text-xs text-bone/45">
-                          {restaurant.estimatedGamesPerWeek} jugadas/semana
-                        </p>
+                        <p className="mt-1 text-xs text-bone/45">{restaurant.activeDeck}</p>
                       </div>
                     </div>
                   </td>
@@ -636,11 +691,14 @@ export default function RestaurantesPage() {
                     </span>
                   </td>
                   <td className="px-5 py-5 text-bone">
-                    {restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent}%
+                    {restaurant.restaurantCommissionPercent}% / HL{" "}
+                    {restaurant.hlCommissionMode === "percent"
+                      ? `${restaurant.hlCommissionValue}%`
+                      : formatCurrency(restaurant.hlCommissionValue)}
                   </td>
                   <td className="px-5 py-5">
                     <div className="flex flex-wrap gap-2">
-                      {restaurant.enabledGames.map((game) => (
+                      {[...restaurant.activeGames, ...restaurant.enabledDecks.filter((deck) => deck !== "loteria")].map((game) => (
                         <span
                           key={game}
                           className="inline-flex items-center gap-1 rounded-full bg-mezcal/12 px-3 py-1 text-xs font-semibold text-mezcal ring-1 ring-mezcal/25"
@@ -717,10 +775,13 @@ export default function RestaurantesPage() {
                 <p>Gerente: {restaurant.managerName || "Sin asignar"}</p>
                 <p>WhatsApp: {restaurant.managerWhatsapp || "Sin captura"}</p>
                 <p>
-                  Comision neta:{" "}
-                  {restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent}%
+                  Comision restaurante: {restaurant.restaurantCommissionPercent}% / HL{" "}
+                  {restaurant.hlCommissionMode === "percent"
+                    ? `${restaurant.hlCommissionValue}%`
+                    : formatCurrency(restaurant.hlCommissionValue)}
                 </p>
-                <p>Juegos: {restaurant.enabledGames.map(getGameLabel).join(", ")}</p>
+                <p>Juegos: {restaurant.activeGames.map(getGameLabel).join(", ")}</p>
+                <p>Decks: {restaurant.enabledDecks.map(getGameLabel).join(", ")}</p>
               </div>
               <div className="mt-4 flex gap-2">
                 <Button
@@ -746,10 +807,10 @@ export default function RestaurantesPage() {
       </Card>
 
       {isFormOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-obsidian/78 px-4 py-6 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-obsidian/78 px-3 py-4 backdrop-blur-sm sm:px-4 sm:py-6">
           <form
             onSubmit={handleSubmit}
-            className="max-h-full w-full max-w-5xl overflow-y-auto rounded-lg border border-bone/12 bg-[#100d0b] p-5 shadow-cantina"
+            className="max-h-[90vh] w-full max-w-5xl overflow-y-auto overscroll-contain rounded-lg border border-bone/12 bg-[#100d0b] p-4 shadow-cantina sm:p-5"
           >
             <div className="flex items-start justify-between gap-4 border-b border-bone/10 pb-4">
               <div>
@@ -797,17 +858,53 @@ export default function RestaurantesPage() {
                   />
                 </Field>
                 <Field label="Logo URL" className="md:col-span-2">
-                  <input
-                    value={formState.logoUrl}
-                    onChange={(event) =>
-                      setFormState((currentState) => ({
-                        ...currentState,
-                        logoUrl: event.target.value,
-                      }))
-                    }
-                    className={inputClassName}
-                    placeholder="https://..."
-                  />
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                    <div className="grid gap-2">
+                      <input
+                        value={formState.logoUrl}
+                        onChange={(event) =>
+                          setFormState((currentState) => ({
+                            ...currentState,
+                            logoUrl: event.target.value,
+                          }))
+                        }
+                        className={inputClassName}
+                        placeholder="https://.../logo.png"
+                      />
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+
+                          if (!file) {
+                            return;
+                          }
+
+                          const reader = new FileReader();
+                          reader.onload = () =>
+                            setFormState((currentState) => ({
+                              ...currentState,
+                              logoUrl: String(reader.result ?? ""),
+                            }));
+                          reader.readAsDataURL(file);
+                        }}
+                        className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
+                      />
+                    </div>
+                    <div className="grid h-16 w-16 place-items-center rounded-lg border border-bone/10 bg-bone/[0.04]">
+                      {formState.logoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={formState.logoUrl}
+                          alt="Preview logo"
+                          className="max-h-14 max-w-14 object-contain"
+                        />
+                      ) : (
+                        <span className="text-xs font-black text-bone/35">PNG</span>
+                      )}
+                    </div>
+                  </div>
                 </Field>
                 <Field label="Giro">
                   <select
@@ -920,36 +1017,8 @@ export default function RestaurantesPage() {
               </FormSection>
 
               <FormSection title="Operacion">
-                <Field label="Hostesses promedio">
-                  <input
-                    type="number"
-                    min={0}
-                    value={formState.averageHostesses}
-                    onChange={(event) =>
-                      setFormState((currentState) => ({
-                        ...currentState,
-                        averageHostesses: event.target.value,
-                      }))
-                    }
-                    className={inputClassName}
-                  />
-                </Field>
-                <Field label="Jugadas estimadas por semana">
-                  <input
-                    type="number"
-                    min={0}
-                    value={formState.estimatedGamesPerWeek}
-                    onChange={(event) =>
-                      setFormState((currentState) => ({
-                        ...currentState,
-                        estimatedGamesPerWeek: event.target.value,
-                      }))
-                    }
-                    className={inputClassName}
-                  />
-                </Field>
                 <div className="md:col-span-2">
-                  <p className="text-sm font-semibold text-bone">Dias fuertes</p>
+                  <p className="text-sm font-semibold text-bone">Dias de operacion</p>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {dayOptions.map((day) => {
                       const selected = formState.strongDays.includes(day);
@@ -978,17 +1047,47 @@ export default function RestaurantesPage() {
                     })}
                   </div>
                 </div>
-                <Field label="Tipo de audiencia" className="md:col-span-2">
+                <div className="md:col-span-2">
+                  <p className="text-sm font-semibold text-bone">Tipo de audiencia</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    {audienceTypeOptions.map((option) => {
+                      const selected = formState.audienceType.includes(option);
+
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() =>
+                            setFormState((currentState) => ({
+                              ...currentState,
+                              audienceType: toggleStringValue(currentState.audienceType, option),
+                            }))
+                          }
+                          className={clsx(
+                            "flex min-h-11 items-center justify-between rounded-lg border px-3 text-left text-sm font-semibold transition",
+                            selected
+                              ? "border-agave/45 bg-agave/14 text-agave"
+                              : "border-bone/10 bg-bone/[0.035] text-bone/62 hover:bg-bone/[0.06]",
+                          )}
+                        >
+                          {option}
+                          {selected ? <Check size={15} /> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <Field label="Notas de audiencia" className="md:col-span-2">
                   <textarea
-                    value={formState.audienceType}
+                    value={formState.audienceNotes}
                     onChange={(event) =>
                       setFormState((currentState) => ({
                         ...currentState,
-                        audienceType: event.target.value,
+                        audienceNotes: event.target.value,
                       }))
                     }
                     className={textareaClassName}
-                    placeholder="Ej. adultos jovenes, after office, familias, celebraciones..."
+                    placeholder="Contexto opcional de perfil, horarios o consumo."
                   />
                 </Field>
                 <Field label="Instagram URL">
@@ -1268,54 +1367,79 @@ export default function RestaurantesPage() {
               </FormSection>
 
               <FormSection title="Configuracion de juego">
-                <Field label="Comision HOSTER LIVE %">
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={formState.commissionHLPercent}
+                <Field label="Modelo comision HL">
+                  <select
+                    value={formState.hlCommissionMode}
                     onChange={(event) =>
                       setFormState((currentState) => ({
                         ...currentState,
-                        commissionHLPercent: event.target.value,
+                        hlCommissionMode: event.target.value as "fixed" | "percent",
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    <option value="fixed">$ fijo</option>
+                    <option value="percent">% de comision</option>
+                  </select>
+                </Field>
+                <Field label={formState.hlCommissionMode === "fixed" ? "Valor HL $" : "Valor HL %"}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={formState.hlCommissionMode === "percent" ? 100 : undefined}
+                    step={formState.hlCommissionMode === "fixed" ? 50 : 1}
+                    value={formState.hlCommissionValue}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        hlCommissionValue: event.target.value,
                       }))
                     }
                     className={inputClassName}
                   />
                 </Field>
-                <Field label="Comision Restaurante %">
+                <Field label="Comision restaurante %">
                   <input
                     type="number"
                     min={0}
                     max={100}
                     step={1}
-                    value={formState.commissionRestaurantPercent}
+                    value={formState.restaurantCommissionPercent}
                     onChange={(event) =>
                       setFormState((currentState) => ({
                         ...currentState,
-                        commissionRestaurantPercent: event.target.value,
+                        restaurantCommissionPercent: event.target.value,
                       }))
                     }
                     className={inputClassName}
                   />
                 </Field>
-                <Field label="Comision neta %">
-                  <input
-                    type="number"
-                    value={
-                      Number(formState.commissionHLPercent || 0) +
-                      Number(formState.commissionRestaurantPercent || 0)
+                <Field label="Deck default">
+                  <select
+                    value={formState.activeDeck}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        activeDeck: event.target.value as DeckId,
+                        enabledDecks: currentState.enabledDecks.includes(event.target.value as DeckId)
+                          ? currentState.enabledDecks
+                          : [...currentState.enabledDecks, event.target.value as DeckId],
+                      }))
                     }
-                    readOnly
                     className={inputClassName}
-                  />
+                  >
+                    {deckOptions.map((deckId) => (
+                      <option key={deckId} value={deckId}>
+                        {getGameLabel(deckId)}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
                 <div>
-                  <p className="text-sm font-semibold text-bone">Juegos habilitados</p>
+                  <p className="text-sm font-semibold text-bone">Juegos activos</p>
                   <div className="mt-3 grid gap-2">
-                    {gameOptions.map((game) => {
-                      const selected = formState.enabledGames.includes(game);
+                    {activeGameOptions.map((game) => {
+                      const selected = formState.activeGames.includes(game);
 
                       return (
                         <button
@@ -1324,7 +1448,14 @@ export default function RestaurantesPage() {
                           onClick={() =>
                             setFormState((currentState) => ({
                               ...currentState,
-                              enabledGames: toggleStringValue(currentState.enabledGames, game),
+                              activeGames: toggleStringValue(
+                                currentState.activeGames,
+                                game,
+                              ) as GameId[],
+                              enabledGames: toggleStringValue(
+                                currentState.activeGames,
+                                game,
+                              ) as GameId[],
                             }))
                           }
                           className={clsx(
@@ -1335,6 +1466,43 @@ export default function RestaurantesPage() {
                           )}
                         >
                           {getGameLabel(game)}
+                          {selected ? <Check size={15} /> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-bone">Decks disponibles</p>
+                  <div className="mt-3 grid gap-2">
+                    {deckOptions.map((deckId) => {
+                      const selected = formState.enabledDecks.includes(deckId);
+
+                      return (
+                        <button
+                          key={deckId}
+                          type="button"
+                          onClick={() =>
+                            setFormState((currentState) => ({
+                              ...currentState,
+                              enabledDecks: selected
+                                ? currentState.enabledDecks.filter((item) => item !== deckId)
+                                : [...currentState.enabledDecks, deckId],
+                              activeDeck:
+                                selected && currentState.activeDeck === deckId
+                                  ? currentState.enabledDecks.find((item) => item !== deckId) ??
+                                    "loteria"
+                                  : currentState.activeDeck,
+                            }))
+                          }
+                          className={clsx(
+                            "flex h-11 items-center justify-between rounded-lg border px-3 text-sm font-semibold transition",
+                            selected
+                              ? "border-mezcal/45 bg-mezcal/14 text-mezcal"
+                              : "border-bone/10 bg-bone/[0.035] text-bone/62 hover:bg-bone/[0.06]",
+                          )}
+                        >
+                          {getGameLabel(deckId)}
                           {selected ? <Check size={15} /> : null}
                         </button>
                       );

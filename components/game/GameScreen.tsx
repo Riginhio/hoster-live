@@ -43,6 +43,7 @@ import {
   type RestaurantSessionChannelStatus,
   type RealtimeSessionDebugRow,
 } from "@/lib/supabase/sessionRealtime";
+import { getDeckCards } from "@/lib/decks";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -156,6 +157,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const patternPositions = getWinPattern(config.mode);
   const previewBoard = winner?.board ?? activeBoards[0] ?? null;
   const activePromotions = activeSession?.activePromotions ?? [];
+  const deckSize = getDeckCards(activeSession?.deckId ?? restaurant.activeDeck).length;
   const standbyTitle = restaurant.standbyTitle || "HOSTER LIVE";
   const standbySubtitle =
     restaurant.standbySubtitle || "La proxima jugada esta por comenzar";
@@ -209,7 +211,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             ? getBoardBatches().find((batch) => batch.id === storedSession.batchId)
             : getActiveBoardBatch(tvRestaurantId);
           const nextBoards = sessionBatch ? toLoteriaBoards(sessionBatch.boards) : [];
-          const nextCalledCards = hydrateSessionCards(storedSession.calledCards);
+          const nextCalledCards = hydrateSessionCards(storedSession.calledCards, storedSession.deckId);
           const isCountdownSession = storedSession.autoplayStatus === "countdown";
 
           if (sessionIdChanged) {
@@ -228,6 +230,10 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             mode: storedSession.mode,
             tablePrice: storedSession.tablePrice,
             commissionPercent: storedSession.commissionPercent,
+            restaurantCommissionPercent: storedSession.restaurantCommissionPercent,
+            hlCommissionMode: storedSession.hlCommissionMode,
+            hlCommissionValue: storedSession.hlCommissionValue,
+            hlFixedFee: storedSession.hlFixedFee,
             calculatedPrize: storedSession.prizeAmount,
             createdAt: storedSession.createdAt,
           });
@@ -259,7 +265,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               winningBoard
                 ? {
                     board: winningBoard,
-                    winningCards: hydrateSessionCards(storedSession.winnerCards),
+                    winningCards: hydrateSessionCards(storedSession.winnerCards, storedSession.deckId),
                   }
                 : null,
             );
@@ -719,7 +725,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-2xl text-bone">Historial</h2>
             <span className="rounded-full bg-agave/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-agave">
-              {calledCards.length}/54
+              {calledCards.length}/{deckSize}
             </span>
           </div>
           <div className="grid max-h-[56vh] gap-3 overflow-auto pr-1 sm:grid-cols-2 xl:grid-cols-1">
@@ -744,6 +750,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                   />
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-bone">{card.name}</p>
+                    {card.confederation ? (
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-mezcal">
+                        {card.confederation}
+                      </p>
+                    ) : null}
                     <p className={isLatest ? "text-xs text-mezcal" : "text-xs text-bone/45"}>
                       {isLatest
                         ? "Carta mas reciente"
@@ -862,7 +873,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 <div className="mx-auto mt-8 grid max-w-xl grid-cols-2 gap-3 text-sm">
                   <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-4">
                     <p className="text-bone/45">Cartas cantadas</p>
-                    <p className="mt-1 text-3xl font-black text-bone">{calledCards.length}/54</p>
+                    <p className="mt-1 text-3xl font-black text-bone">{calledCards.length}/{deckSize}</p>
                   </div>
                   <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-4">
                     <p className="text-bone/45">Ganadora</p>
@@ -916,6 +927,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               <p className="mt-5 text-sm font-semibold uppercase tracking-[0.28em] text-bone/50">
                 {currentCard?.name ?? "Carta actual"}
               </p>
+              {currentCard?.confederation ? (
+                <p className="mt-2 text-xs font-black uppercase tracking-[0.2em] text-mezcal">
+                  {currentCard.confederation}
+                </p>
+              ) : null}
             </section>
           )}
         </main>
@@ -984,7 +1000,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             </div>
             <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-3">
               <p className="text-bone/45">Cartas cantadas</p>
-              <p className="mt-1 text-2xl font-black text-bone">{calledCards.length}/54</p>
+              <p className="mt-1 text-2xl font-black text-bone">{calledCards.length}/{deckSize}</p>
             </div>
           </div>
         </aside>

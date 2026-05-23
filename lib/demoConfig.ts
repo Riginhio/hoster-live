@@ -7,6 +7,10 @@ export type DemoGameConfig = {
   mode: WinMode;
   tablePrice: number;
   commissionPercent: number;
+  restaurantCommissionPercent: number;
+  hlCommissionMode: "fixed" | "percent";
+  hlCommissionValue: number;
+  hlFixedFee: number;
   calculatedPrize: number;
   createdAt?: string;
 };
@@ -34,7 +38,7 @@ export function createDefaultDemoConfig(restaurantId = defaultRestaurantId): Dem
   const restaurant = getRestaurantById(restaurantId);
   const activeTables = restaurant.allowedTableCounts[restaurant.allowedTableCounts.length - 1];
   const tablePrice = restaurant.allowedPrices[0];
-  const commissionPercent = restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
+  const commissionPercent = restaurant.restaurantCommissionPercent;
 
   return {
     restaurantId: restaurant.id,
@@ -42,6 +46,10 @@ export function createDefaultDemoConfig(restaurantId = defaultRestaurantId): Dem
     mode: restaurant.allowedModes[0],
     tablePrice,
     commissionPercent,
+    restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+    hlCommissionMode: restaurant.hlCommissionMode,
+    hlCommissionValue: restaurant.hlCommissionValue,
+    hlFixedFee: restaurant.hlFixedFee,
     calculatedPrize: calculatePrize(activeTables, tablePrice, commissionPercent),
   };
 }
@@ -67,7 +75,15 @@ export function normalizeDemoConfig(
     restaurant.allowedPrices[0];
   const commissionPercent =
     asNumber(value.commissionPercent) ??
-    restaurant.commissionHLPercent + restaurant.commissionRestaurantPercent;
+    restaurant.restaurantCommissionPercent;
+  const restaurantCommissionPercent =
+    asNumber(value.restaurantCommissionPercent) ?? commissionPercent;
+  const hlFixedFee = asNumber(value.hlFixedFee) ?? restaurant.hlFixedFee;
+  const hlCommissionMode =
+    value.hlCommissionMode === "percent" || value.hlCommissionMode === "fixed"
+      ? value.hlCommissionMode
+      : restaurant.hlCommissionMode;
+  const hlCommissionValue = asNumber(value.hlCommissionValue) ?? restaurant.hlCommissionValue;
   const mode = asMode(value.mode) ?? restaurant.allowedModes[0];
   const safeActiveTables = restaurant.allowedTableCounts.includes(activeTables)
     ? activeTables
@@ -83,6 +99,10 @@ export function normalizeDemoConfig(
     mode: safeMode,
     tablePrice: safeTablePrice,
     commissionPercent,
+    restaurantCommissionPercent,
+    hlCommissionMode,
+    hlCommissionValue,
+    hlFixedFee,
     calculatedPrize:
       asNumber(value.calculatedPrize) ??
       calculatePrize(safeActiveTables, safeTablePrice, commissionPercent),
