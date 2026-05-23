@@ -79,6 +79,56 @@ select option {
   animation: latest-board-card 1000ms ease-out both;
 }
 
+.login-fade {
+  animation: login-fade 780ms ease-out both;
+}
+
+.login-ambient-glow {
+  animation: login-ambient-glow 9s ease-in-out infinite alternate;
+}
+
+.login-light-sweep {
+  animation: login-light-sweep 8s ease-in-out infinite alternate;
+}
+
+@keyframes login-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(8px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes login-ambient-glow {
+  0% {
+    opacity: 0.42;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+
+  100% {
+    opacity: 0.72;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+@keyframes login-light-sweep {
+  0% {
+    opacity: 0.18;
+    transform: translateX(-4%) rotate(-8deg);
+  }
+
+  100% {
+    opacity: 0.42;
+    transform: translateX(4%) rotate(-8deg);
+  }
+}
+
 @keyframes loteria-card-reveal {
   0% {
     opacity: 0;
