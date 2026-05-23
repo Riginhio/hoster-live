@@ -1,4 +1,5 @@
 import type { BusinessType, RestaurantConfig } from "@/lib/types";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 export const restaurantsStorageKey = "loteria:restaurants";
 
@@ -156,7 +157,9 @@ function normalizeStringArray(value: unknown, fallback: string[] = []) {
 }
 
 function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig {
-  const fallback = fallbackById.get(value.id ?? "") ?? demoRestaurant;
+  const requestedSlug = normalizeRestaurantSlug(value.slug ?? value.id ?? value.name, demoRestaurant.slug);
+  const fallback = fallbackById.get(requestedSlug) ?? fallbackById.get(value.id ?? "") ?? demoRestaurant;
+  const slug = normalizeRestaurantSlug(value.slug ?? value.id ?? value.name, fallback.slug);
   const active = value.isActive ?? value.active ?? true;
   const commissionHLPercent = normalizeNumber(value.commissionHLPercent, 0);
   const commissionRestaurantPercent = normalizeNumber(
@@ -166,8 +169,8 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
   const commissionNetPercent = commissionHLPercent + commissionRestaurantPercent;
 
   return {
-    id: value.id ?? crypto.randomUUID(),
-    slug: normalizeText(value.slug, value.id ?? fallback.slug),
+    id: slug,
+    slug,
     name: normalizeText(value.name, fallback.name),
     logoUrl: normalizeText(value.logoUrl, fallback.logoUrl),
     active,
@@ -244,10 +247,18 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
 }
 
 function mergeDefaultRestaurants(restaurants: RestaurantConfig[]) {
-  const knownIds = new Set(restaurants.map((restaurant) => restaurant.id));
+  const uniqueRestaurants = Array.from(
+    restaurants
+      .reduce<Map<string, RestaurantConfig>>((map, restaurant) => {
+        map.set(restaurant.id, restaurant);
+        return map;
+      }, new Map())
+      .values(),
+  );
+  const knownIds = new Set(uniqueRestaurants.map((restaurant) => restaurant.id));
   const missingDefaults = defaultRestaurants.filter((restaurant) => !knownIds.has(restaurant.id));
 
-  return [...restaurants, ...missingDefaults];
+  return [...uniqueRestaurants, ...missingDefaults];
 }
 
 export function getRestaurants(): RestaurantConfig[] {
@@ -284,21 +295,31 @@ export function saveRestaurants(restaurants: RestaurantConfig[]) {
     return restaurants;
   }
 
-  window.localStorage.setItem(restaurantsStorageKey, JSON.stringify(restaurants));
-  return restaurants;
+  const normalizedRestaurants = Array.from(
+    restaurants
+      .map(normalizeRestaurant)
+      .reduce<Map<string, RestaurantConfig>>((map, restaurant) => {
+        map.set(restaurant.id, restaurant);
+        return map;
+      }, new Map())
+      .values(),
+  );
+  window.localStorage.setItem(restaurantsStorageKey, JSON.stringify(normalizedRestaurants));
+  return normalizedRestaurants;
 }
 
 export function createRestaurant(
   restaurant: Partial<RestaurantConfig> & Pick<RestaurantConfig, "name">,
 ) {
   const restaurants = getRestaurants();
+  const slug = normalizeRestaurantSlug(restaurant.slug ?? restaurant.name);
   const createdRestaurant = normalizeRestaurant({
     ...restaurant,
-    id: restaurant.id ?? crypto.randomUUID(),
-    slug: restaurant.slug ?? restaurant.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    id: slug,
+    slug,
   });
 
-  saveRestaurants([...restaurants, createdRestaurant]);
+  saveRestaurants([...restaurants.filter((current) => current.id !== createdRestaurant.id), createdRestaurant]);
   return createdRestaurant;
 }
 
@@ -307,38 +328,50 @@ export function updateRestaurant(
   updates: Partial<Omit<RestaurantConfig, "id">>,
 ) {
   const restaurants = getRestaurants();
+  const targetSlug = normalizeRestaurantSlug(restaurantId);
   const updatedRestaurants = restaurants.map((restaurant) =>
-    restaurant.id === restaurantId ? normalizeRestaurant({ ...restaurant, ...updates }) : restaurant,
+    restaurant.id === targetSlug || restaurant.slug === targetSlug
+      ? normalizeRestaurant({ ...restaurant, ...updates, id: updates.slug ?? restaurant.slug })
+      : restaurant,
   );
 
   saveRestaurants(updatedRestaurants);
-  return updatedRestaurants.find((restaurant) => restaurant.id === restaurantId);
+  const nextSlug = normalizeRestaurantSlug(updates.slug ?? targetSlug);
+  return updatedRestaurants.find((restaurant) => restaurant.id === nextSlug);
 }
 
 export function toggleRestaurant(restaurantId: string) {
   const restaurants = getRestaurants();
+  const targetSlug = normalizeRestaurantSlug(restaurantId);
   const updatedRestaurants = restaurants.map((restaurant) =>
-    restaurant.id === restaurantId
+    restaurant.id === targetSlug || restaurant.slug === targetSlug
       ? { ...restaurant, active: !restaurant.active, isActive: !restaurant.active }
       : restaurant,
   );
 
   saveRestaurants(updatedRestaurants);
-  return updatedRestaurants.find((restaurant) => restaurant.id === restaurantId);
+  return updatedRestaurants.find((restaurant) => restaurant.id === targetSlug);
 }
 
 export function getRestaurantById(restaurantId: string) {
+  const targetSlug = normalizeRestaurantSlug(restaurantId);
   return getRestaurants().find(
-    (restaurant) => restaurant.id === restaurantId || restaurant.slug === restaurantId,
+    (restaurant) =>
+      restaurant.id === targetSlug ||
+      restaurant.slug === targetSlug ||
+      normalizeRestaurantSlug(restaurant.name) === targetSlug,
   );
 }
 
 export function archiveRestaurant(restaurantId: string) {
   const restaurants = getRestaurants();
+  const targetSlug = normalizeRestaurantSlug(restaurantId);
   const updatedRestaurants = restaurants.map((restaurant) =>
-    restaurant.id === restaurantId ? { ...restaurant, active: false, isActive: false } : restaurant,
+    restaurant.id === targetSlug || restaurant.slug === targetSlug
+      ? { ...restaurant, active: false, isActive: false }
+      : restaurant,
   );
 
   saveRestaurants(updatedRestaurants);
-  return updatedRestaurants.find((restaurant) => restaurant.id === restaurantId);
+  return updatedRestaurants.find((restaurant) => restaurant.id === targetSlug);
 }

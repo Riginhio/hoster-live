@@ -1,3 +1,5 @@
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+
 export type BoardValidationPayload = {
   restaurantId: string;
   restaurantName?: string;
@@ -27,7 +29,12 @@ function base64UrlDecode(value: string) {
 }
 
 export function encodeBoardValidationPayload(payload: BoardValidationPayload) {
-  return base64UrlEncode(JSON.stringify(payload));
+  return base64UrlEncode(
+    JSON.stringify({
+      ...payload,
+      restaurantId: normalizeRestaurantSlug(payload.restaurantId),
+    }),
+  );
 }
 
 export function decodeBoardValidationPayload(payload: string): BoardValidationPayload | null {
@@ -42,7 +49,7 @@ export function decodeBoardValidationPayload(payload: string): BoardValidationPa
     }
 
     return {
-      restaurantId: parsedValue.restaurantId,
+      restaurantId: normalizeRestaurantSlug(parsedValue.restaurantId),
       restaurantName: parsedValue.restaurantName,
       batchId: parsedValue.batchId,
       batchName: parsedValue.batchName,

@@ -47,6 +47,11 @@ create index if not exists game_sessions_last_updated_idx
 
 alter table public.game_sessions enable row level security;
 
+-- DEV DIAGNOSTIC OPTION:
+-- If inserts/selects are still blocked while diagnosing browser-only Realtime,
+-- run the next line manually in development only. Do not use this in production.
+-- alter table public.game_sessions disable row level security;
+
 -- Development policy for browser-only prototype.
 -- Tighten this before production by scoping access to authenticated users,
 -- venue roles, or service-side RPC functions.

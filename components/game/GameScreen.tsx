@@ -34,11 +34,14 @@ import {
   setStoredAudioEnabled,
   unlockGameAudio,
 } from "@/lib/audio/gameAudio";
-import { getSupabaseConfigStatus } from "@/lib/supabase/client";
+import { getSupabaseClientDebugStatus, getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
   getActiveRealtimeSessionByRestaurantId,
+  getLatestRealtimeSessionDebugByRestaurantId,
   realtimeSessionToSession,
   subscribeToRestaurantSession,
+  type RestaurantSessionChannelStatus,
+  type RealtimeSessionDebugRow,
 } from "@/lib/supabase/sessionRealtime";
 
 type GameScreenProps = {
@@ -119,19 +122,31 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [realtimeSession, setRealtimeSession] = useState<Session | null>(null);
-  const [realtimeStatus, setRealtimeStatus] = useState<"connected" | "disconnected" | "fallback">("fallback");
+  const [realtimeStatus, setRealtimeStatus] = useState<"connected" | "supabase-polling" | "empty" | "disconnected" | "fallback">("fallback");
+  const [channelStatus, setChannelStatus] = useState<RestaurantSessionChannelStatus | "NO_CLIENT">("NO_CLIENT");
+  const [lastRealtimeError, setLastRealtimeError] = useState("");
+  const [lastRealtimeSessionFound, setLastRealtimeSessionFound] = useState(false);
+  const [latestRealtimeDebugRow, setLatestRealtimeDebugRow] = useState<RealtimeSessionDebugRow | null>(null);
   const lastSyncSignatureRef = useRef("");
   const previousCalledCountRef = useRef(0);
   const previousWinnerFolioRef = useRef<string | undefined>(undefined);
   const supabaseStatus = getSupabaseConfigStatus();
+  const supabaseDebugStatus = getSupabaseClientDebugStatus();
+  const missingSupabaseVariables = supabaseStatus.missingVariables.join(", ");
   const syncBadgeLabel =
     realtimeStatus === "connected"
       ? "Realtime conectado"
-      : realtimeStatus === "disconnected"
+      : realtimeStatus === "supabase-polling"
+        ? "Supabase polling"
+        : realtimeStatus === "empty"
+        ? "Sin sesi?n realtime"
+        : realtimeStatus === "disconnected"
         ? "Realtime desconectado"
         : "Fallback local";
 
   const restaurant = getRestaurantById(restaurantId);
+  const tvRestaurantId = restaurant.id;
+  const realtimeRestaurantId = tvRestaurantId;
   const restaurantPrimary = restaurant.primaryColor || restaurant.theme.primaryColor;
   const restaurantSecondary = restaurant.secondaryColor || restaurant.theme.secondaryColor;
   const restaurantAccent = restaurant.accentColor || "#d9a441";
@@ -148,7 +163,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     restaurant.standbyPromoText || "Compra tus tablas con tu hostess";
   const standbyCtaText = restaurant.standbyCtaText || "Pide tu tabla ahora";
   const standbyPromotions = restaurant.standbyRotatePromotions
-    ? getActiveQrCampaignsForRestaurant(restaurantId)
+    ? getActiveQrCampaignsForRestaurant(tvRestaurantId)
     : [];
   const visualStatus = activeSession?.autoplayStatus === "countdown"
     ? "countdown"
@@ -174,7 +189,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   useEffect(() => {
     function syncSession() {
       try {
-        const activeRestaurantSession = realtimeSession ?? getActiveSessionByRestaurantId(restaurantId);
+        const activeRestaurantSession = realtimeSession ?? getActiveSessionByRestaurantId(tvRestaurantId);
         const currentStoredSession = activeSession?.id
           ? getSessionById(activeSession.id)
           : undefined;
@@ -192,7 +207,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           const sessionIdChanged = previousSessionId && previousSessionId !== storedSession.id;
           const sessionBatch = storedSession.batchId
             ? getBoardBatches().find((batch) => batch.id === storedSession.batchId)
-            : getActiveBoardBatch(restaurantId);
+            : getActiveBoardBatch(tvRestaurantId);
           const nextBoards = sessionBatch ? toLoteriaBoards(sessionBatch.boards) : [];
           const nextCalledCards = hydrateSessionCards(storedSession.calledCards);
           const isCountdownSession = storedSession.autoplayStatus === "countdown";
@@ -255,7 +270,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           return;
         }
 
-        const activeBatch = getActiveBoardBatch(restaurantId);
+        const activeBatch = getActiveBoardBatch(tvRestaurantId);
         lastSyncSignatureRef.current = "none";
         setBatchBoards(activeBatch ? toLoteriaBoards(activeBatch.boards) : []);
         setActiveSession(null);
@@ -266,16 +281,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
         const parsedConfig = parseStoredDemoConfig(
           localStorage.getItem(configStorageKey),
-          restaurantId,
+          tvRestaurantId,
         );
 
         setConfig(
-          parsedConfig.restaurantId === restaurantId
+          parsedConfig.restaurantId === tvRestaurantId
             ? parsedConfig
-            : createDefaultDemoConfig(restaurantId),
+            : createDefaultDemoConfig(tvRestaurantId),
         );
       } catch {
-        setConfig(createDefaultDemoConfig(restaurantId));
+        setConfig(createDefaultDemoConfig(tvRestaurantId));
       }
     }
 
@@ -287,52 +302,106 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       globalThis.clearInterval(intervalId);
       window.removeEventListener("storage", syncSession);
     };
-  }, [activeSession?.id, activeSession?.lastUpdatedAt, audioEnabled, realtimeSession, restaurantId]);
+  }, [activeSession?.id, activeSession?.lastUpdatedAt, audioEnabled, realtimeSession, tvRestaurantId]);
 
   useEffect(() => {
     if (!supabaseStatus.connected) {
       setRealtimeStatus("fallback");
       setRealtimeSession(null);
+      setChannelStatus("NO_CLIENT");
+      setLastRealtimeError(missingSupabaseVariables);
+      setLastRealtimeSessionFound(false);
+      setLatestRealtimeDebugRow(null);
       return;
     }
 
     let isMounted = true;
+    let latestChannelStatus: RestaurantSessionChannelStatus | "NO_CLIENT" = "NO_CLIENT";
 
-    getActiveRealtimeSessionByRestaurantId(restaurantId)
-      .then((result) => {
+    async function queryRealtimeSession() {
+      try {
+        const [result, debugResult] = await Promise.all([
+          getActiveRealtimeSessionByRestaurantId(realtimeRestaurantId),
+          getLatestRealtimeSessionDebugByRestaurantId(realtimeRestaurantId),
+        ]);
+
         if (!isMounted) {
           return;
         }
 
+        setLatestRealtimeDebugRow(debugResult.data);
+
         if (result.error) {
           setRealtimeStatus("disconnected");
+          setLastRealtimeError(result.error.message);
+          setLastRealtimeSessionFound(false);
           return;
         }
 
-        setRealtimeStatus("connected");
+        setLastRealtimeError(debugResult.error?.message ?? "");
+        setLastRealtimeSessionFound(Boolean(result.data));
+        setRealtimeStatus(
+          latestChannelStatus === "SUBSCRIBED"
+            ? "connected"
+            : result.data
+              ? "supabase-polling"
+              : "empty",
+        );
         setRealtimeSession(result.data ? realtimeSessionToSession(result.data) : null);
-      })
-      .catch(() => {
+      } catch {
         if (isMounted) {
           setRealtimeStatus("disconnected");
+          setLastRealtimeError("No se pudo consultar Supabase.");
+          setLastRealtimeSessionFound(false);
         }
-      });
+      }
+    }
+
+    void queryRealtimeSession();
+    const realtimePollingId = globalThis.setInterval(queryRealtimeSession, 1800);
 
     const unsubscribe = subscribeToRestaurantSession(
-      restaurantId,
+      realtimeRestaurantId,
       (session) => {
-        setRealtimeSession(session ? realtimeSessionToSession(session) : null);
+        const nextSession = session ? realtimeSessionToSession(session) : null;
+        setRealtimeSession(nextSession);
+        setLastRealtimeSessionFound(Boolean(nextSession));
+        setLatestRealtimeDebugRow(
+          session
+            ? {
+                id: session.id,
+                restaurant_id: session.restaurant_id,
+                autoplay_status: session.autoplay_status,
+              }
+            : null,
+        );
+        setRealtimeStatus(nextSession ? "connected" : "empty");
       },
-      (status) => {
-        setRealtimeStatus(status === "SUBSCRIBED" ? "connected" : "disconnected");
+      (state) => {
+        latestChannelStatus = state.status;
+        setChannelStatus(state.status);
+
+        if (state.status === "SUBSCRIBED") {
+          setRealtimeStatus("connected");
+          setLastRealtimeError("");
+        } else {
+          setRealtimeStatus((currentStatus) =>
+            currentStatus === "connected" || currentStatus === "supabase-polling"
+              ? "supabase-polling"
+              : currentStatus,
+          );
+          setLastRealtimeError(`Canal ${state.status}`);
+          void queryRealtimeSession();
+        }
       },
     );
 
     return () => {
       isMounted = false;
+      globalThis.clearInterval(realtimePollingId);
       unsubscribe();
     };
-  }, [restaurantId, supabaseStatus.connected]);
+  }, [missingSupabaseVariables, realtimeRestaurantId, supabaseStatus.connected]);
 
   useEffect(() => {
     setAudioEnabled(getStoredAudioEnabled());
@@ -368,6 +437,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
         <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
+        <RealtimeDebugPanel
+          channelStatus={channelStatus}
+          clientCreated={supabaseDebugStatus.clientCreated}
+          error={lastRealtimeError}
+          hasAnonKey={supabaseDebugStatus.hasAnonKey}
+          hasSession={lastRealtimeSessionFound}
+          hasUrl={supabaseDebugStatus.hasUrl}
+          latestRow={latestRealtimeDebugRow}
+          restaurantId={realtimeRestaurantId}
+        />
         <section
           className="grid min-h-[calc(100vh-4rem)] w-full max-w-[1800px] place-items-center rounded-lg border border-mezcal/35 bg-[radial-gradient(circle_at_50%_18%,rgba(217,164,65,0.28),rgba(20,17,15,0.92)_48%,rgba(8,7,6,0.99)_100%)] p-6 text-center shadow-cantina md:p-10"
           style={{
@@ -461,6 +540,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
         <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
+        <RealtimeDebugPanel
+          channelStatus={channelStatus}
+          clientCreated={supabaseDebugStatus.clientCreated}
+          error={lastRealtimeError}
+          hasAnonKey={supabaseDebugStatus.hasAnonKey}
+          hasSession={lastRealtimeSessionFound}
+          hasUrl={supabaseDebugStatus.hasUrl}
+          latestRow={latestRealtimeDebugRow}
+          restaurantId={realtimeRestaurantId}
+        />
         <section
           className="relative grid min-h-[calc(100vh-4rem)] w-full max-w-[1800px] overflow-hidden rounded-lg border border-bone/10 bg-[radial-gradient(circle_at_50%_12%,rgba(217,164,65,0.18),rgba(31,161,135,0.12)_32%,rgba(20,17,15,0.94)_58%,rgba(8,7,6,0.99)_100%)] p-6 shadow-cantina md:p-10"
           style={{
@@ -615,6 +704,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   return (
     <div className="screen-safe cantina-grid bg-obsidian p-4 md:p-6">
       <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
+      <RealtimeDebugPanel
+        channelStatus={channelStatus}
+        clientCreated={supabaseDebugStatus.clientCreated}
+        error={lastRealtimeError}
+        hasAnonKey={supabaseDebugStatus.hasAnonKey}
+        hasSession={lastRealtimeSessionFound}
+        hasUrl={supabaseDebugStatus.hasUrl}
+        latestRow={latestRealtimeDebugRow}
+        restaurantId={realtimeRestaurantId}
+      />
       <div className="mx-auto grid h-full max-w-[1800px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)_420px]">
         <aside className="order-2 rounded-lg border border-bone/10 bg-obsidian/70 p-4 shadow-cantina backdrop-blur xl:order-1">
           <div className="mb-4 flex items-center justify-between">
@@ -937,7 +1036,7 @@ function SyncModeBadge({
   className,
 }: {
   label: string;
-  status: "connected" | "disconnected" | "fallback";
+  status: "connected" | "supabase-polling" | "empty" | "disconnected" | "fallback";
   className?: string;
 }) {
   return (
@@ -945,6 +1044,10 @@ function SyncModeBadge({
       className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.16em] backdrop-blur ${
         status === "connected"
           ? "border-agave/30 bg-agave/12 text-agave"
+          : status === "supabase-polling"
+            ? "border-mezcal/30 bg-mezcal/12 text-mezcal"
+          : status === "empty"
+            ? "border-bone/20 bg-obsidian/70 text-bone/70"
           : status === "disconnected"
             ? "border-chile/30 bg-chile/12 text-[#ff9b91]"
             : "border-mezcal/30 bg-obsidian/70 text-mezcal"
@@ -952,6 +1055,65 @@ function SyncModeBadge({
     >
       {label}
     </span>
+  );
+}
+
+function RealtimeDebugPanel({
+  channelStatus,
+  clientCreated,
+  error,
+  hasAnonKey,
+  hasSession,
+  hasUrl,
+  latestRow,
+  restaurantId,
+}: {
+  channelStatus: RestaurantSessionChannelStatus | "NO_CLIENT";
+  clientCreated: boolean;
+  error: string;
+  hasAnonKey: boolean;
+  hasSession: boolean;
+  hasUrl: boolean;
+  latestRow: RealtimeSessionDebugRow | null;
+  restaurantId: string;
+}) {
+  if (process.env.NODE_ENV !== "development") {
+    return null;
+  }
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 w-72 rounded-lg border border-bone/10 bg-obsidian/88 p-3 text-[11px] font-semibold text-bone/62 shadow-cantina backdrop-blur">
+      <p className="mb-2 text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+        Realtime debug
+      </p>
+      <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+        <dt>Supabase URL cargada</dt>
+        <dd className={hasUrl ? "text-agave" : "text-[#ff9b91]"}>{hasUrl ? "si" : "no"}</dd>
+        <dt>Anon key cargada</dt>
+        <dd className={hasAnonKey ? "text-agave" : "text-[#ff9b91]"}>{hasAnonKey ? "si" : "no"}</dd>
+        <dt>Cliente creado</dt>
+        <dd className={clientCreated ? "text-agave" : "text-[#ff9b91]"}>{clientCreated ? "si" : "no"}</dd>
+        <dt>Canal</dt>
+        <dd className="text-bone">{channelStatus}</dd>
+        <dt>Restaurant ID</dt>
+        <dd className="text-bone">{restaurantId}</dd>
+        <dt>Sesion Supabase</dt>
+        <dd className={hasSession ? "text-agave" : "text-mezcal"}>{hasSession ? "si" : "no"}</dd>
+        <dt>Ultima row</dt>
+        <dd className={latestRow ? "text-agave" : "text-mezcal"}>{latestRow ? "si" : "no"}</dd>
+        <dt>Row id</dt>
+        <dd className="max-w-32 truncate text-bone">{latestRow?.id ?? "-"}</dd>
+        <dt>Row restaurant_id</dt>
+        <dd className="text-bone">{latestRow?.restaurant_id ?? "-"}</dd>
+        <dt>Row autoplay</dt>
+        <dd className="text-bone">{latestRow?.autoplay_status ?? "-"}</dd>
+      </dl>
+      {error ? (
+        <p className="mt-2 rounded border border-chile/25 bg-chile/10 p-2 text-[#ff9b91]">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -14,6 +14,7 @@ import {
   toggleRestaurant,
   updateRestaurant,
 } from "@/lib/restaurants/restaurantStorage";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 type RestaurantFormState = {
   name: string;
@@ -406,9 +407,7 @@ export default function RestaurantesPage() {
 
     const payload = {
       name: formState.name.trim(),
-      slug:
-        formState.slug.trim() ||
-        formState.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      slug: normalizeRestaurantSlug(formState.slug || formState.name),
       logoUrl: formState.logoUrl.trim(),
       businessType: formState.businessType,
       managerName: formState.managerName.trim(),

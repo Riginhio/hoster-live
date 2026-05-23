@@ -1,5 +1,6 @@
 import type { QrCampaign } from "@/lib/types";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 export const qrCampaignsStorageKey = "hoster-live:qr-campaigns";
 
@@ -41,9 +42,10 @@ function isNowWithinRange(campaign: QrCampaign) {
 }
 
 function appliesToRestaurant(campaign: QrCampaign, restaurantId: string) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   return (
     campaign.appliesToRestaurantIds === "all" ||
-    campaign.appliesToRestaurantIds.includes(restaurantId)
+    campaign.appliesToRestaurantIds.includes(slug)
   );
 }
 
@@ -61,7 +63,12 @@ function normalizeCampaign(campaign: Partial<QrCampaign>): QrCampaign {
     bannerImageUrl: campaign.bannerImageUrl ?? "",
     validFrom: campaign.validFrom ?? "",
     validTo: campaign.validTo ?? "",
-    appliesToRestaurantIds: campaign.appliesToRestaurantIds ?? "all",
+    appliesToRestaurantIds:
+      campaign.appliesToRestaurantIds === "all" || !campaign.appliesToRestaurantIds
+        ? "all"
+        : campaign.appliesToRestaurantIds.map((restaurantId) =>
+            getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId),
+          ),
   };
 }
 
@@ -105,11 +112,12 @@ export function getActiveQrCampaignForRestaurant(restaurantId: string) {
 }
 
 export function getActiveQrCampaignsForRestaurant(restaurantId: string) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   const campaigns = getQrCampaigns();
-  const restaurant = getRestaurantById(restaurantId);
+  const restaurant = getRestaurantById(slug);
   const applicableCampaigns = campaigns.filter(
     (campaign) =>
-      campaign.active && appliesToRestaurant(campaign, restaurantId) && isNowWithinRange(campaign),
+      campaign.active && appliesToRestaurant(campaign, slug) && isNowWithinRange(campaign),
   );
   const configuredCampaign = restaurant?.qrCampaignId
     ? applicableCampaigns.find((campaign) => campaign.id === restaurant.qrCampaignId)
@@ -133,8 +141,15 @@ export function createQrCampaign(
   campaign: Omit<QrCampaign, "id" | "active"> &
     Partial<Pick<QrCampaign, "id" | "active">>,
 ) {
+  const appliesToRestaurantIds =
+    campaign.appliesToRestaurantIds === "all"
+      ? "all"
+      : campaign.appliesToRestaurantIds.map((restaurantId) =>
+          getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId),
+        );
   const createdCampaign: QrCampaign = {
     ...campaign,
+    appliesToRestaurantIds,
     id: campaign.id ?? createId(),
     active: campaign.active ?? true,
   };
@@ -144,8 +159,22 @@ export function createQrCampaign(
 }
 
 export function updateQrCampaign(campaignId: string, updates: Partial<Omit<QrCampaign, "id">>) {
+  const normalizedAppliesToRestaurantIds: QrCampaign["appliesToRestaurantIds"] | undefined =
+    updates.appliesToRestaurantIds
+      ? updates.appliesToRestaurantIds === "all"
+        ? "all"
+        : updates.appliesToRestaurantIds.map((restaurantId) =>
+            getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId),
+          )
+      : undefined;
+  const normalizedUpdates: Partial<Omit<QrCampaign, "id">> = {
+    ...updates,
+    ...(normalizedAppliesToRestaurantIds
+      ? { appliesToRestaurantIds: normalizedAppliesToRestaurantIds }
+      : {}),
+  };
   const updatedCampaigns = getQrCampaigns().map((campaign) =>
-    campaign.id === campaignId ? { ...campaign, ...updates } : campaign,
+    campaign.id === campaignId ? normalizeCampaign({ ...campaign, ...normalizedUpdates }) : campaign,
   );
 
   saveQrCampaigns(updatedCampaigns);

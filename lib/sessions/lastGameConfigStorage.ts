@@ -1,4 +1,6 @@
 import type { WinMode } from "@/lib/loteria";
+import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 export type LastGameConfig = {
   activeTables: number;
@@ -73,7 +75,8 @@ function getLastGameConfigs(): LastGameConfigByRestaurant {
         const normalizedConfig = normalizeConfig(config);
 
         if (normalizedConfig) {
-          configs[restaurantId] = normalizedConfig;
+          const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
+          configs[slug] = normalizedConfig;
         }
 
         return configs;
@@ -86,13 +89,15 @@ function getLastGameConfigs(): LastGameConfigByRestaurant {
 }
 
 export function getLastGameConfig(restaurantId: string) {
-  return getLastGameConfigs()[restaurantId] ?? null;
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
+  return getLastGameConfigs()[slug] ?? null;
 }
 
 export function saveLastGameConfig(restaurantId: string, config: LastGameConfig) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   const configs = {
     ...getLastGameConfigs(),
-    [restaurantId]: config,
+    [slug]: config,
   };
 
   if (hasLocalStorage()) {

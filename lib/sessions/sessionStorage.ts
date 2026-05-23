@@ -1,6 +1,8 @@
 import { loteriaCards, type LoteriaCard, type WinMode } from "@/lib/loteria";
 import { calculateFinancialBreakdown } from "@/lib/finance";
 import type { QrCampaign } from "@/lib/types";
+import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 export type SessionStatus = "active" | "finalized";
 export type AutoplayStatus = "idle" | "countdown" | "playing" | "paused" | "finished";
@@ -123,13 +125,25 @@ export function getSessions(): Session[] {
 
   try {
     const parsedValue = JSON.parse(rawValue) as Session[];
-    return Array.isArray(parsedValue) ? parsedValue.map(normalizeSession) : [];
+    if (!Array.isArray(parsedValue)) {
+      return [];
+    }
+
+    const sessions = parsedValue.map(normalizeSession);
+    saveSessions(sessions);
+    return sessions;
   } catch {
     return [];
   }
 }
 
 function normalizeSession(session: Partial<Session>): Session {
+  const fallbackRestaurantId = "rancho-viejo";
+  const restaurant =
+    getRestaurantById(session.restaurantId ?? "") ??
+    getRestaurantById(session.restaurantName ?? "") ??
+    getRestaurantById(fallbackRestaurantId);
+  const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(session.restaurantId, fallbackRestaurantId);
   const breakdown = calculateFinancialBreakdown({
     activeTables: session.activeTables ?? 0,
     tablePrice: session.tablePrice ?? 0,
@@ -141,8 +155,8 @@ function normalizeSession(session: Partial<Session>): Session {
   return {
     id: session.id ?? createSessionId(),
     batchId: session.batchId,
-    restaurantId: session.restaurantId ?? "rancho-viejo",
-    restaurantName: session.restaurantName ?? "Rancho Viejo",
+    restaurantId,
+    restaurantName: session.restaurantName ?? restaurant?.name ?? "Rancho Viejo",
     createdAt: session.createdAt ?? new Date().toISOString(),
     startedAt: session.startedAt ?? session.createdAt ?? new Date().toISOString(),
     endedAt: session.endedAt,
@@ -265,6 +279,11 @@ export function createSession(
     >,
 ) {
   const now = new Date().toISOString();
+  const restaurant =
+    getRestaurantById(session.restaurantId) ??
+    getRestaurantById(session.restaurantName) ??
+    getRestaurantById("rancho-viejo");
+  const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(session.restaurantId, "rancho-viejo");
   const breakdown = calculateFinancialBreakdown({
     activeTables: session.activeTables,
     tablePrice: session.tablePrice,
@@ -275,8 +294,8 @@ export function createSession(
   const createdSession: Session = {
     id: session.id ?? createSessionId(),
     batchId: session.batchId,
-    restaurantId: session.restaurantId,
-    restaurantName: session.restaurantName,
+    restaurantId,
+    restaurantName: restaurant?.name ?? session.restaurantName,
     createdAt: session.createdAt ?? now,
     startedAt: session.startedAt ?? now,
     lastUpdatedAt: session.lastUpdatedAt ?? now,
@@ -380,8 +399,9 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
 }
 
 export function getActiveSessionByRestaurantId(restaurantId: string) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   return getSessions().find(
-    (session) => session.restaurantId === restaurantId && session.status === "active",
+    (session) => session.restaurantId === slug && session.status === "active",
   );
 }
 

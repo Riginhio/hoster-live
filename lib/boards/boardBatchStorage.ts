@@ -4,6 +4,8 @@ import {
   type LoteriaCard,
 } from "@/lib/loteria";
 import { encodeBoardValidationPayload } from "@/lib/qr/qrPayload";
+import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 export type BoardBatchStatus = "active" | "inactive" | "archived";
 
@@ -69,18 +71,20 @@ function createBoardCards(seed: number) {
 }
 
 function createBoardsForBatch(batchId: string, restaurantId: string, quantity: number): Board[] {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
+
   return Array.from({ length: quantity }, (_, index) => {
     const folio = `HL-${String(index + 1).padStart(3, "0")}`;
 
     return {
       id: `${batchId}-${folio}`,
       batchId,
-      restaurantId,
+      restaurantId: slug,
       folio,
       cards: createBoardCards(index + 1401),
       qrPayload: encodeBoardValidationPayload({
         batchId,
-        restaurantId,
+        restaurantId: slug,
         folio,
       }),
       isActive: true,
@@ -93,20 +97,21 @@ function createDefaultBatch(
   restaurantName: string,
   name: string,
 ): BoardBatch {
-  const id = `batch-${restaurantId}-default`;
+  const slug = normalizeRestaurantSlug(restaurantId);
+  const id = `batch-${slug}-default`;
   const validFrom = "2026-05-01";
   const validTo = "2026-12-31";
 
   return {
     id,
-    restaurantId,
+    restaurantId: slug,
     restaurantName,
     name,
     quantity: 50,
     status: "active",
     validFrom,
     validTo,
-    boards: createBoardsForBatch(id, restaurantId, 50),
+    boards: createBoardsForBatch(id, slug, 50),
     createdAt: "2026-05-21T00:00:00.000Z",
   };
 }
@@ -117,11 +122,27 @@ export const defaultBoardBatches: BoardBatch[] = [
 ];
 
 function normalizeBatch(batch: BoardBatch): BoardBatch {
+  const restaurant =
+    getRestaurantById(batch.restaurantId) ??
+    getRestaurantById(batch.restaurantName) ??
+    getRestaurantById("rancho-viejo");
+  const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(batch.restaurantId, "rancho-viejo");
+
   return {
     ...batch,
+    restaurantId,
+    restaurantName: restaurant?.name ?? batch.restaurantName,
     boards: batch.boards?.length
-      ? batch.boards
-      : createBoardsForBatch(batch.id, batch.restaurantId, batch.quantity),
+      ? batch.boards.map((board) => ({
+          ...board,
+          restaurantId,
+          qrPayload: encodeBoardValidationPayload({
+            batchId: board.batchId,
+            restaurantId,
+            folio: board.folio,
+          }),
+        }))
+      : createBoardsForBatch(batch.id, restaurantId, batch.quantity),
   };
 }
 
@@ -167,8 +188,9 @@ export function saveBoardBatches(batches: BoardBatch[]) {
 }
 
 export function getActiveBoardBatch(restaurantId: string) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   return getBoardBatches().find(
-    (batch) => batch.restaurantId === restaurantId && batch.status === "active",
+    (batch) => batch.restaurantId === slug && batch.status === "active",
   );
 }
 
@@ -182,16 +204,18 @@ export function createBoardBatch(input: {
   activate?: boolean;
 }) {
   const id = createId("batch");
+  const restaurant = getRestaurantById(input.restaurantId) ?? getRestaurantById(input.restaurantName);
+  const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(input.restaurantId);
   const batch: BoardBatch = {
     id,
-    restaurantId: input.restaurantId,
-    restaurantName: input.restaurantName,
+    restaurantId,
+    restaurantName: restaurant?.name ?? input.restaurantName,
     name: input.name,
     quantity: input.quantity,
     status: input.activate ?? true ? "active" : "inactive",
     validFrom: input.validFrom,
     validTo: input.validTo,
-    boards: createBoardsForBatch(id, input.restaurantId, input.quantity),
+    boards: createBoardsForBatch(id, restaurantId, input.quantity),
     createdAt: new Date().toISOString(),
   };
   const currentBatches = getBoardBatches();

@@ -1,3 +1,5 @@
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+
 export type UserRole = "master" | "gerente" | "tv";
 
 export type MockUser = {
@@ -41,7 +43,7 @@ export function toAuthUser(user: MockUser): AuthUser {
     email: user.email,
     role: user.role,
     name: user.name,
-    restaurantId: user.restaurantId,
+    restaurantId: user.restaurantId ? normalizeRestaurantSlug(user.restaurantId) : undefined,
     restaurantName: user.restaurantName,
   };
 }

@@ -1,7 +1,8 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { PostgrestError, RealtimeChannel } from "@supabase/supabase-js";
 import type { WinMode } from "@/lib/loteria";
 import type { Session } from "@/lib/sessions/sessionStorage";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 export type RealtimeGameSession = {
   id: string;
@@ -35,9 +36,26 @@ export type RealtimeGameSession = {
   created_at: string;
 };
 
+export type RestaurantSessionChannelStatus =
+  | "SUBSCRIBED"
+  | "CHANNEL_ERROR"
+  | "TIMED_OUT"
+  | "CLOSED";
+
+export type RestaurantSessionChannelState = {
+  status: RestaurantSessionChannelStatus;
+  label: "Realtime conectado" | "Realtime desconectado";
+};
+
+export type RealtimeSessionDebugRow = {
+  id: string;
+  restaurant_id: string;
+  autoplay_status: string;
+};
+
 type RealtimeResult<T> = {
   data: T | null;
-  error: Error | null;
+  error: PostgrestError | Error | null;
   mode: "local" | "supabase";
 };
 
@@ -62,9 +80,11 @@ type RealtimeSessionUpdate = Partial<
 >;
 
 function toRealtimePayload(session: Session) {
+  const restaurantId = normalizeRestaurantSlug(session.restaurantId);
+
   return {
     id: session.id,
-    restaurant_id: session.restaurantId,
+    restaurant_id: restaurantId,
     restaurant_name: session.restaurantName,
     status: session.status,
     autoplay_status: session.autoplayStatus,
@@ -162,8 +182,25 @@ function localResult<T>(): RealtimeResult<T> {
   return { data: null, error: null, mode: "local" };
 }
 
+function toChannelState(status: string): RestaurantSessionChannelState {
+  if (status === "SUBSCRIBED") {
+    return { status: "SUBSCRIBED", label: "Realtime conectado" };
+  }
+
+  if (status === "TIMED_OUT") {
+    return { status: "TIMED_OUT", label: "Realtime desconectado" };
+  }
+
+  if (status === "CLOSED") {
+    return { status: "CLOSED", label: "Realtime desconectado" };
+  }
+
+  return { status: "CHANNEL_ERROR", label: "Realtime desconectado" };
+}
+
 export async function createRealtimeSession(session: Session): Promise<RealtimeResult<RealtimeGameSession>> {
   const supabase = getSupabaseClient();
+  const restaurantId = normalizeRestaurantSlug(session.restaurantId);
 
   if (!supabase) {
     return localResult();
@@ -177,7 +214,7 @@ export async function createRealtimeSession(session: Session): Promise<RealtimeR
       play_ended_at: new Date().toISOString(),
       last_updated_at: new Date().toISOString(),
     })
-    .eq("restaurant_id", session.restaurantId)
+    .eq("restaurant_id", restaurantId)
     .eq("status", "active");
 
   const { data, error } = await supabase
@@ -186,7 +223,26 @@ export async function createRealtimeSession(session: Session): Promise<RealtimeR
     .select()
     .single();
 
-  return { data: data as RealtimeGameSession | null, error, mode: "supabase" };
+  const realtimeSession = data as RealtimeGameSession | null;
+
+  if (process.env.NODE_ENV === "development") {
+    if (error) {
+      console.warn("[HOSTER LIVE] INSERT REALTIME SESSION ERROR", {
+        message: error.message,
+        details: error.details,
+        code: error.code,
+        sessionId: session.id,
+        restaurant_id: restaurantId,
+      });
+    } else {
+      console.info("[HOSTER LIVE] INSERT REALTIME SESSION OK", {
+        sessionId: realtimeSession?.id,
+        restaurant_id: realtimeSession?.restaurant_id,
+      });
+    }
+  }
+
+  return { data: realtimeSession, error, mode: "supabase" };
 }
 
 export async function updateRealtimeSession(
@@ -213,6 +269,49 @@ export async function getActiveRealtimeSessionByRestaurantId(
   restaurantId: string,
 ): Promise<RealtimeResult<RealtimeGameSession>> {
   const supabase = getSupabaseClient();
+  const slug = normalizeRestaurantSlug(restaurantId);
+
+  if (!supabase) {
+    return localResult();
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    console.info("[HOSTER LIVE] QUERY restaurant_id:", slug);
+  }
+
+  const { data, error } = await supabase
+    .from("game_sessions")
+    .select("*")
+    .eq("restaurant_id", slug)
+    .eq("status", "active")
+    .in("autoplay_status", ["idle", "countdown", "playing", "paused", "winner"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (process.env.NODE_ENV === "development") {
+    if (data) {
+      console.info("[HOSTER LIVE] SESSION FOUND realtime:", {
+        id: data.id,
+        restaurant_id: data.restaurant_id,
+        autoplay_status: data.autoplay_status,
+      });
+    } else {
+      console.info("[HOSTER LIVE] SESSION NOT FOUND realtime:", {
+        restaurant_id: slug,
+        error: error?.message,
+      });
+    }
+  }
+
+  return { data: data as RealtimeGameSession | null, error, mode: "supabase" };
+}
+
+export async function getLatestRealtimeSessionDebugByRestaurantId(
+  restaurantId: string,
+): Promise<RealtimeResult<RealtimeSessionDebugRow>> {
+  const supabase = getSupabaseClient();
+  const slug = normalizeRestaurantSlug(restaurantId);
 
   if (!supabase) {
     return localResult();
@@ -220,47 +319,95 @@ export async function getActiveRealtimeSessionByRestaurantId(
 
   const { data, error } = await supabase
     .from("game_sessions")
-    .select("*")
-    .eq("restaurant_id", restaurantId)
-    .eq("status", "active")
+    .select("id, restaurant_id, autoplay_status")
+    .eq("restaurant_id", slug)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  return { data: data as RealtimeGameSession | null, error, mode: "supabase" };
+  return { data: data as RealtimeSessionDebugRow | null, error, mode: "supabase" };
 }
 
 export function subscribeToRestaurantSession(
   restaurantId: string,
   onChange: (session: RealtimeGameSession | null) => void,
-  onStatusChange?: (status: string) => void,
+  onStatusChange?: (status: RestaurantSessionChannelState) => void,
 ) {
   const supabase = getSupabaseClient();
+  const slug = normalizeRestaurantSlug(restaurantId);
 
   if (!supabase) {
     return () => undefined;
   }
 
-  const channel: RealtimeChannel = supabase
-    .channel(`game_sessions:${restaurantId}`)
-    .on(
-      "postgres_changes",
-      {
+  let channel: RealtimeChannel | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let closedByClient = false;
+
+  const openChannel = () => {
+    const channelName = `game_sessions:${slug}:${Date.now()}`;
+
+    if (process.env.NODE_ENV === "development") {
+      console.info("[HOSTER LIVE] SUBSCRIBE restaurant_id:", slug);
+      console.info("[HOSTER LIVE] Realtime subscribe config", {
+        channelName,
         event: "*",
         schema: "public",
         table: "game_sessions",
-        filter: `restaurant_id=eq.${restaurantId}`,
-      },
-      (payload) => {
-        onChange((payload.new || payload.old || null) as RealtimeGameSession | null);
-      },
-    )
-    .subscribe((status) => {
-      onStatusChange?.(status);
-    });
+        filter: `restaurant_id=eq.${slug}`,
+      });
+    }
+
+    channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_sessions",
+          filter: `restaurant_id=eq.${slug}`,
+        },
+        (payload) => {
+          onChange((payload.new || payload.old || null) as RealtimeGameSession | null);
+        },
+      )
+      .subscribe((status) => {
+      const channelState = toChannelState(status);
+
+      if (process.env.NODE_ENV === "development") {
+        console.info("[HOSTER LIVE] Realtime channel status", {
+          restaurantId: slug,
+          status: channelState.status,
+          label: channelState.label,
+        });
+      }
+
+      onStatusChange?.(channelState);
+
+        if ((status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") && !closedByClient) {
+          reconnectTimer = setTimeout(() => {
+            if (channel) {
+              void supabase.removeChannel(channel);
+            }
+
+            openChannel();
+          }, 1200);
+        }
+      });
+  };
+
+  openChannel();
 
   return () => {
-    void supabase.removeChannel(channel);
+    closedByClient = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+    }
+
+    if (channel) {
+      void supabase.removeChannel(channel);
+    }
   };
 }
 
