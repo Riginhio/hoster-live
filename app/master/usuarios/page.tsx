@@ -1,13 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { KeyRound, Pencil, Power, Plus } from "lucide-react";
+import { KeyRound, Pencil, Power, Plus, Trash2, X } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
 import type { RestaurantConfig } from "@/lib/types";
 import {
+  deleteManagerUser,
   getManagerUsers,
   toggleManagerUser,
   upsertManagerUser,
@@ -24,6 +25,7 @@ export default function MasterUsuariosPage() {
     name: "Gerente",
     restaurantId: "rancho-viejo",
     role: "manager" as "manager" | "play",
+    active: true,
   });
 
   function refresh() {
@@ -37,6 +39,7 @@ export default function MasterUsuariosPage() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const existingUser = users.find((user) => user.id === formState.id);
     upsertManagerUser({
       username: formState.username,
       password: formState.password,
@@ -44,15 +47,33 @@ export default function MasterUsuariosPage() {
       restaurantId: formState.restaurantId,
       id: formState.id || undefined,
       role: formState.role,
-      active: true,
+      active: existingUser?.active ?? formState.active,
     });
-    setFormState((current) => ({ ...current, id: "" }));
+    setFormState((current) => ({ ...current, id: "", active: true }));
     refresh();
   }
 
   function handleToggle(userId: string) {
     toggleManagerUser(userId);
     refresh();
+  }
+
+  function handleDelete(userId: string) {
+    deleteManagerUser(userId);
+    setFormState((current) => (current.id === userId ? { ...current, id: "", active: true } : current));
+    refresh();
+  }
+
+  function resetForm() {
+    setFormState({
+      id: "",
+      username: "gerente@hosterlive.mx",
+      password: "Hoster123",
+      name: "Gerente",
+      restaurantId: restaurants[0]?.id ?? "rancho-viejo",
+      role: "manager",
+      active: true,
+    });
   }
 
   return (
@@ -110,12 +131,18 @@ export default function MasterUsuariosPage() {
               <Plus size={16} />
               {formState.id ? "Actualizar usuario" : "Guardar usuario"}
             </Button>
+            {formState.id ? (
+              <Button type="button" variant="secondary" className="w-full" onClick={resetForm}>
+                <X size={16} />
+                Cancelar edicion
+              </Button>
+            ) : null}
           </form>
         </Card>
 
         <Card className="overflow-hidden p-0">
           <div className="border-b border-bone/10 px-5 py-4">
-            <h2 className="font-display text-3xl text-bone">Gerentes activos</h2>
+            <h2 className="font-display text-3xl text-bone">Usuarios por restaurante</h2>
           </div>
           <div className="divide-y divide-bone/10">
             {users.map((user) => {
@@ -141,6 +168,7 @@ export default function MasterUsuariosPage() {
                           name: user.name,
                           restaurantId: user.restaurantId,
                           role: user.role,
+                          active: user.active,
                         })
                       }
                     >
@@ -150,6 +178,10 @@ export default function MasterUsuariosPage() {
                     <Button variant={user.active ? "secondary" : "ghost"} onClick={() => handleToggle(user.id)}>
                       <Power size={16} />
                       {user.active ? "Activo" : "Inactivo"}
+                    </Button>
+                    <Button variant="danger" onClick={() => handleDelete(user.id)}>
+                      <Trash2 size={16} />
+                      Borrar
                     </Button>
                   </div>
                 </div>

@@ -1,12 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Plus, Power } from "lucide-react";
+import { Pencil, Plus, Power, Trash2, X } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
+  deleteManagerUser,
   getManagerUsers,
   toggleManagerUser,
   upsertManagerUser,
@@ -22,6 +23,7 @@ export default function GerenteUsuariosPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [editingUserId, setEditingUserId] = useState("");
   const isPlay = currentUser?.venueRole === "play";
 
   function refreshUsers() {
@@ -45,14 +47,17 @@ export default function GerenteUsuariosPage() {
       return;
     }
 
+    const existingUser = users.find((user) => user.id === editingUserId);
     upsertManagerUser({
+      id: editingUserId || undefined,
       username,
       password: password || "Hoster123",
       name: name || username,
       restaurantId: currentUser.restaurantId,
       role: "play",
-      active: true,
+      active: existingUser?.active ?? true,
     });
+    setEditingUserId("");
     setUsername("");
     setPassword("");
     setName("");
@@ -62,6 +67,31 @@ export default function GerenteUsuariosPage() {
   function handleToggle(userId: string) {
     toggleManagerUser(userId);
     refreshUsers();
+  }
+
+  function handleEdit(user: ManagerUser) {
+    setEditingUserId(user.id);
+    setUsername(user.username);
+    setPassword(user.password);
+    setName(user.name);
+  }
+
+  function handleDelete(userId: string) {
+    deleteManagerUser(userId);
+    if (editingUserId === userId) {
+      setEditingUserId("");
+      setUsername("");
+      setPassword("");
+      setName("");
+    }
+    refreshUsers();
+  }
+
+  function cancelEdit() {
+    setEditingUserId("");
+    setUsername("");
+    setPassword("");
+    setName("");
   }
 
   return (
@@ -76,7 +106,9 @@ export default function GerenteUsuariosPage() {
       ) : (
         <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <Card>
-            <h2 className="font-display text-3xl text-bone">Crear usuario Play</h2>
+            <h2 className="font-display text-3xl text-bone">
+              {editingUserId ? "Editar usuario Play" : "Crear usuario Play"}
+            </h2>
             <form onSubmit={handleSubmit} className="mt-5 grid gap-3">
               <input
                 value={name}
@@ -98,8 +130,14 @@ export default function GerenteUsuariosPage() {
               />
               <Button type="submit">
                 <Plus size={16} />
-                Crear Play
+                {editingUserId ? "Actualizar Play" : "Crear Play"}
               </Button>
+              {editingUserId ? (
+                <Button type="button" variant="secondary" onClick={cancelEdit}>
+                  <X size={16} />
+                  Cancelar
+                </Button>
+              ) : null}
             </form>
           </Card>
 
@@ -118,11 +156,22 @@ export default function GerenteUsuariosPage() {
                     </p>
                   </div>
                   <Button
+                    variant="secondary"
+                    onClick={() => handleEdit(user)}
+                  >
+                    <Pencil size={16} />
+                    Editar
+                  </Button>
+                  <Button
                     variant={user.active ? "danger" : "primary"}
                     onClick={() => handleToggle(user.id)}
                   >
                     <Power size={16} />
                     {user.active ? "Desactivar" : "Activar"}
+                  </Button>
+                  <Button variant="danger" onClick={() => handleDelete(user.id)}>
+                    <Trash2 size={16} />
+                    Borrar
                   </Button>
                 </div>
               ))}

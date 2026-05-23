@@ -1,4 +1,8 @@
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import {
+  deleteManagerUserFromSupabase,
+  upsertManagerUsersToSupabase,
+} from "@/lib/supabase/persistence";
 
 export type ManagerUser = {
   id: string;
@@ -63,6 +67,7 @@ export function saveManagerUsers(users: ManagerUser[]) {
   }
 
   window.localStorage.setItem(managerUsersStorageKey, JSON.stringify(users.map(normalizeUser)));
+  void upsertManagerUsersToSupabase(users);
   return users;
 }
 
@@ -83,4 +88,12 @@ export function toggleManagerUser(userId: string) {
   );
   saveManagerUsers(updatedUsers);
   return updatedUsers.find((user) => user.id === userId);
+}
+
+export function deleteManagerUser(userId: string) {
+  const users = getManagerUsers();
+  const updatedUsers = users.filter((user) => user.id !== userId);
+  saveManagerUsers(updatedUsers);
+  void deleteManagerUserFromSupabase(userId);
+  return updatedUsers;
 }

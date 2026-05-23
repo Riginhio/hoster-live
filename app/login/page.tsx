@@ -111,6 +111,8 @@ export default function LoginPage() {
             <p className="mt-1">master@hosterlive.mx / Hoster123</p>
             <p>gerente@hosterlive.mx / Hoster123</p>
             <p>tv@hosterlive.mx / Hoster123</p>
+            <p>demo-manager@hosterlive.mx / Demo123</p>
+            <p>demo-play@hosterlive.mx / Demo123</p>
           </div>
 
           <p className="mt-8 text-center text-xs font-semibold uppercase tracking-[0.24em] text-bone/32">

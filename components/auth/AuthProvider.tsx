@@ -11,6 +11,8 @@ import {
 } from "react";
 import { mockUsers, toAuthUser, type AuthUser, type UserRole } from "@/lib/auth/mockUsers";
 import { getManagerUsers } from "@/lib/auth/managerUsersStorage";
+import { clearAuthCookie, parseAuthCookieValue, setAuthCookie } from "@/lib/auth/sessionCookie";
+import { ensureDemoSeed } from "@/lib/demo/demoSeed";
 
 type LoginResult =
   | { ok: true; user: AuthUser; redirectTo: string }
@@ -77,12 +79,34 @@ function parseStoredUser(rawValue: string | null) {
   }
 }
 
+function hydrateFromCookie() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const cookieValue = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith("hoster-live-auth="))
+    ?.split("=")[1];
+
+  return parseAuthCookieValue(cookieValue);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    setCurrentUser(parseStoredUser(window.localStorage.getItem(authStorageKey)));
+    ensureDemoSeed();
+    const storedUser = parseStoredUser(window.localStorage.getItem(authStorageKey));
+    const cookieUser = hydrateFromCookie();
+    const nextUser = storedUser ?? cookieUser;
+
+    if (nextUser && !storedUser) {
+      window.localStorage.setItem(authStorageKey, JSON.stringify(nextUser));
+    }
+
+    setCurrentUser(nextUser);
     setIsReady(true);
   }, []);
 
@@ -92,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (user) => user.active && user.username.toLowerCase() === normalizedEmail && user.password === password,
     );
 
-    if (managerUser) {
+      if (managerUser) {
       const authUser: AuthUser = {
         email: managerUser.username,
         role: "gerente",
@@ -102,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userId: managerUser.id,
       };
       window.localStorage.setItem(authStorageKey, JSON.stringify(authUser));
+      setAuthCookie(authUser);
       setCurrentUser(authUser);
       return { ok: true, user: authUser, redirectTo: getRedirectForRole(authUser) };
     }
@@ -117,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const authUser = toAuthUser(user);
     window.localStorage.setItem(authStorageKey, JSON.stringify(authUser));
+    setAuthCookie(authUser);
     setCurrentUser(authUser);
 
     return { ok: true, user: authUser, redirectTo: getRedirectForRole(authUser) };
@@ -124,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     window.localStorage.removeItem(authStorageKey);
+    clearAuthCookie();
     setCurrentUser(null);
   }, []);
 

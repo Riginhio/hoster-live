@@ -6,6 +6,87 @@
 
 create extension if not exists "pgcrypto";
 
+create table if not exists public.restaurants (
+  id text primary key,
+  slug text not null,
+  name text not null,
+  logo_url text not null default '',
+  active boolean not null default true,
+  is_active boolean not null default true,
+  business_type text not null,
+  manager_name text not null default '',
+  manager_whatsapp text not null default '',
+  manager_email text not null default '',
+  owner_name text not null default '',
+  owner_whatsapp text not null default '',
+  address text not null default '',
+  google_maps_url text not null default '',
+  instagram_url text not null default '',
+  facebook_url text not null default '',
+  tiktok_url text not null default '',
+  average_hostesses int not null default 0,
+  strong_days jsonb not null default '[]'::jsonb,
+  estimated_games_per_week int not null default 0,
+  audience_type jsonb not null default '[]'::jsonb,
+  audience_notes text not null default '',
+  notes text not null default '',
+  restaurant_commission_percent numeric not null default 0,
+  hl_commission_mode text not null default 'fixed',
+  hl_commission_value numeric not null default 0,
+  hl_fixed_fee numeric not null default 0,
+  active_deck text not null default 'loteria',
+  commission_percent numeric not null default 0,
+  commission_hl_percent numeric not null default 0,
+  commission_restaurant_percent numeric not null default 0,
+  allowed_table_counts jsonb not null default '[]'::jsonb,
+  allowed_prices jsonb not null default '[]'::jsonb,
+  allowed_modes jsonb not null default '[]'::jsonb,
+  enabled_games jsonb not null default '[]'::jsonb,
+  active_games jsonb not null default '[]'::jsonb,
+  enabled_decks jsonb not null default '[]'::jsonb,
+  primary_color text not null default '#d9a441',
+  secondary_color text not null default '#1fa187',
+  accent_color text not null default '#c0392b',
+  autoplay_default boolean not null default true,
+  autoplay_interval int not null default 5000,
+  show_clock boolean not null default true,
+  show_sponsors boolean not null default true,
+  show_promotions boolean not null default true,
+  show_qr_promo boolean not null default true,
+  promo_title text not null default '',
+  promo_subtitle text not null default '',
+  promo_image_url text not null default '',
+  standby_title text not null default '',
+  standby_subtitle text not null default '',
+  standby_image_url text not null default '',
+  standby_promo_text text not null default '',
+  standby_cta_text text not null default '',
+  standby_cta_qr_url text not null default '',
+  standby_rotate_promotions boolean not null default true,
+  instagram text not null default '',
+  facebook text not null default '',
+  tiktok text not null default '',
+  qr_campaign_id text not null default '',
+  theme jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.manager_users (
+  id text primary key,
+  username text not null unique,
+  password text not null,
+  name text not null,
+  restaurant_id text not null references public.restaurants(id) on delete cascade,
+  role text not null default 'manager',
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists manager_users_restaurant_idx
+  on public.manager_users (restaurant_id, active);
+
 create table if not exists public.game_sessions (
   id uuid primary key default gen_random_uuid(),
   restaurant_id text not null,
@@ -58,7 +139,35 @@ create index if not exists game_sessions_restaurant_active_idx
 create index if not exists game_sessions_last_updated_idx
   on public.game_sessions (last_updated_at desc);
 
+alter table public.restaurants enable row level security;
+alter table public.manager_users enable row level security;
 alter table public.game_sessions enable row level security;
+
+drop policy if exists "hoster live dev read restaurants" on public.restaurants;
+create policy "hoster live dev read restaurants"
+  on public.restaurants
+  for select
+  using (true);
+
+drop policy if exists "hoster live dev write restaurants" on public.restaurants;
+create policy "hoster live dev write restaurants"
+  on public.restaurants
+  for all
+  using (true)
+  with check (true);
+
+drop policy if exists "hoster live dev read manager users" on public.manager_users;
+create policy "hoster live dev read manager users"
+  on public.manager_users
+  for select
+  using (true);
+
+drop policy if exists "hoster live dev write manager users" on public.manager_users;
+create policy "hoster live dev write manager users"
+  on public.manager_users
+  for all
+  using (true)
+  with check (true);
 
 -- DEV DIAGNOSTIC OPTION:
 -- If inserts/selects are still blocked while diagnosing browser-only Realtime,

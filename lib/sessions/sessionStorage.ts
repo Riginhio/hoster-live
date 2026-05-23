@@ -229,6 +229,12 @@ function saveSessions(sessions: Session[]) {
   return sessions;
 }
 
+function syncSessionToSupabase(session: Session) {
+  void import("@/lib/supabase/persistence").then(({ upsertSessionToSupabase }) =>
+    upsertSessionToSupabase(session),
+  );
+}
+
 function finalizeSession(session: Session, endedAt: string): Session {
   return normalizeSession({
     ...session,
@@ -448,7 +454,11 @@ export function updateSession(sessionId: string, updates: Partial<Omit<Session, 
   });
 
   saveSessions(updatedSessions);
-  return updatedSessions.find((session) => session.id === sessionId);
+  const updatedSession = updatedSessions.find((session) => session.id === sessionId);
+  if (updatedSession) {
+    syncSessionToSupabase(updatedSession);
+  }
+  return updatedSession;
 }
 
 export function closeSession(sessionId: string, updates: Partial<Omit<Session, "id">> = {}) {

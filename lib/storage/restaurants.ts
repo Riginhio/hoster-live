@@ -1,6 +1,7 @@
 import type { BusinessType, RestaurantConfig } from "@/lib/types";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 import { normalizeDeckId, type GameId } from "@/lib/decks";
+import { upsertRestaurantsToSupabase } from "@/lib/supabase/persistence";
 
 export const restaurantsStorageKey = "loteria:restaurants";
 
@@ -362,6 +363,7 @@ export function saveRestaurants(restaurants: RestaurantConfig[]) {
       .values(),
   );
   window.localStorage.setItem(restaurantsStorageKey, JSON.stringify(normalizedRestaurants));
+  void upsertRestaurantsToSupabase(normalizedRestaurants);
   return normalizedRestaurants;
 }
 
@@ -377,6 +379,7 @@ export function createRestaurant(
   });
 
   saveRestaurants([...restaurants.filter((current) => current.id !== createdRestaurant.id), createdRestaurant]);
+  void upsertRestaurantsToSupabase([createdRestaurant]);
   return createdRestaurant;
 }
 
@@ -393,6 +396,7 @@ export function updateRestaurant(
   );
 
   saveRestaurants(updatedRestaurants);
+  void upsertRestaurantsToSupabase(updatedRestaurants);
   const nextSlug = normalizeRestaurantSlug(updates.slug ?? targetSlug);
   return updatedRestaurants.find((restaurant) => restaurant.id === nextSlug);
 }
@@ -407,6 +411,7 @@ export function toggleRestaurant(restaurantId: string) {
   );
 
   saveRestaurants(updatedRestaurants);
+  void upsertRestaurantsToSupabase(updatedRestaurants);
   return updatedRestaurants.find((restaurant) => restaurant.id === targetSlug);
 }
 
@@ -430,5 +435,6 @@ export function archiveRestaurant(restaurantId: string) {
   );
 
   saveRestaurants(updatedRestaurants);
+  void upsertRestaurantsToSupabase(updatedRestaurants);
   return updatedRestaurants.find((restaurant) => restaurant.id === targetSlug);
 }

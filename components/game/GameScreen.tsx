@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Megaphone, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { BrandMark } from "@/components/brand/BrandMark";
-import { getWinPattern, type LoteriaBoard, type LoteriaCard } from "@/lib/loteria";
+import type { LoteriaBoard, LoteriaCard } from "@/lib/loteria";
 import type { WinMode } from "@/lib/loteria";
 import {
   configStorageKey,
@@ -115,7 +115,6 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [config, setConfig] = useState<DemoGameConfig>(() =>
     createDefaultDemoConfig(restaurantId),
   );
-  const [batchBoards, setBatchBoards] = useState<LoteriaBoard[]>([]);
   const [calledCards, setCalledCards] = useState<LoteriaCard[]>([]);
   const [winner, setWinner] = useState<WinnerState | null>(null);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
@@ -151,11 +150,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const restaurantPrimary = restaurant.primaryColor || restaurant.theme.primaryColor;
   const restaurantSecondary = restaurant.secondaryColor || restaurant.theme.secondaryColor;
   const restaurantAccent = restaurant.accentColor || "#d9a441";
-  const activeBoards = batchBoards.slice(0, config.activeTables);
   const currentCard = calledCards[calledCards.length - 1] ?? null;
-  const winningCardIds = new Set(winner?.winningCards.map((card) => card.id) ?? []);
-  const patternPositions = getWinPattern(config.mode);
-  const previewBoard = winner?.board ?? activeBoards[0] ?? null;
   const activePromotions = activeSession?.activePromotions ?? [];
   const deckSize = getDeckCards(activeSession?.deckId ?? restaurant.activeDeck).length;
   const standbyTitle = restaurant.standbyTitle || "HOSTER LIVE";
@@ -222,7 +217,6 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             previousWinnerFolioRef.current = undefined;
           }
 
-          setBatchBoards(nextBoards);
           setActiveSession(storedSession);
           setConfig({
             restaurantId: storedSession.restaurantId,
@@ -276,9 +270,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           return;
         }
 
-        const activeBatch = getActiveBoardBatch(tvRestaurantId);
         lastSyncSignatureRef.current = "none";
-        setBatchBoards(activeBatch ? toLoteriaBoards(activeBatch.boards) : []);
         setActiveSession(null);
         setWinner(null);
         setCalledCards([]);
@@ -720,7 +712,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         latestRow={latestRealtimeDebugRow}
         restaurantId={realtimeRestaurantId}
       />
-      <div className="mx-auto grid h-full max-w-[1800px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)_420px]">
+      <div className="mx-auto grid h-full max-w-[1500px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="order-2 rounded-lg border border-bone/10 bg-obsidian/70 p-4 shadow-cantina backdrop-blur xl:order-1">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-2xl text-bone">Historial</h2>
@@ -936,74 +928,6 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           )}
         </main>
 
-        <aside className="order-3 rounded-lg border border-bone/10 bg-charcoal/78 p-4 shadow-cantina backdrop-blur">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-agave">
-                {winner ? "Tabla ganadora" : "Tabla demo"}
-              </p>
-              <h2 className="font-display text-3xl text-bone">{previewBoard?.folio ?? "Sin lote"}</h2>
-            </div>
-            <span className="rounded-full bg-mezcal/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-mezcal">
-              {modeLabels[config.mode]}
-            </span>
-          </div>
-
-          {previewBoard ? (
-            <div className="grid grid-cols-4 gap-2">
-              {previewBoard.cards.flatMap((row, rowIndex) =>
-                row.map((card, colIndex) => {
-                  const isCalled = calledCards.some((calledCard) => calledCard.id === card.id);
-                  const isPattern = patternPositions.some(
-                    (position) => position.row === rowIndex && position.col === colIndex,
-                  );
-                  const isWinningCard = winningCardIds.has(card.id);
-
-                  return (
-                    <div
-                      key={card.id}
-                      className={`flex aspect-square min-w-0 flex-col justify-between rounded-lg border p-2 text-center transition ${
-                        isWinningCard
-                          ? "border-mezcal bg-mezcal text-obsidian shadow-glow"
-                          : isCalled
-                            ? "border-agave/60 bg-agave/20 text-bone"
-                            : isPattern
-                              ? "border-mezcal/45 bg-mezcal/10 text-bone"
-                              : "border-bone/10 bg-bone/[0.04] text-bone/70"
-                      }`}
-                    >
-                      <Image
-                        src={card.image}
-                        alt={card.name}
-                        width={90}
-                        height={140}
-                        className="min-h-0 flex-1 rounded object-cover"
-                      />
-                      <span className="mt-1 text-[10px] font-black">
-                        {String(card.number).padStart(2, "0")}
-                      </span>
-                    </div>
-                  );
-                }),
-              )}
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-bone/15 p-5 text-sm text-bone/55">
-              No hay lote activo disponible para este restaurante.
-            </div>
-          )}
-
-          <div className="mt-5 grid gap-3 text-sm">
-            <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-3">
-              <p className="text-bone/45">Tablas revisadas</p>
-              <p className="mt-1 text-2xl font-black text-bone">{activeBoards.length}</p>
-            </div>
-            <div className="rounded-lg border border-bone/10 bg-obsidian/55 p-3">
-              <p className="text-bone/45">Cartas cantadas</p>
-              <p className="mt-1 text-2xl font-black text-bone">{calledCards.length}/{deckSize}</p>
-            </div>
-          </div>
-        </aside>
       </div>
 
       {winner ? (
