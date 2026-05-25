@@ -7,11 +7,16 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { BoardCard } from "@/components/game/BoardCard";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { refreshRestaurantsFromSupabase } from "@/lib/restaurants/restaurantStorage";
 import {
   getActiveSessionByRestaurantId,
   getSessions,
   type Session,
 } from "@/lib/sessions/sessionStorage";
+import {
+  getLatestRealtimeSessionByRestaurantId,
+  realtimeSessionToSession,
+} from "@/lib/supabase/sessionRealtime";
 import {
   type WinMode,
 } from "@/lib/loteria";
@@ -47,18 +52,27 @@ export default function GerenteTablasPage() {
   const [selectedDeckId, setSelectedDeckId] = useState<DeckId>("loteria");
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [isExporting, setIsExporting] = useState(false);
+  const [enabledDecks, setEnabledDecks] = useState<DeckId[]>(["loteria"]);
+  const [debugSource, setDebugSource] = useState("localStorage");
+  const [latestRemoteSession, setLatestRemoteSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    function syncTablesState() {
+    async function syncTablesState() {
       const restaurantId = currentUser?.restaurantId;
+      const refreshedRestaurants = await refreshRestaurantsFromSupabase();
+      const restaurant = refreshedRestaurants.restaurants.find((item) => item.id === restaurantId);
       const restaurantBatches = getBoardBatches().filter((batch) =>
         restaurantId ? batch.restaurantId === restaurantId : true,
       );
+      const remoteResult = restaurantId
+        ? await getLatestRealtimeSessionByRestaurantId(restaurantId)
+        : null;
+      const remoteSession = remoteResult?.data ? realtimeSessionToSession(remoteResult.data) : null;
       const activeSession = restaurantId ? getActiveSessionByRestaurantId(restaurantId) : undefined;
-      const latestSession = getSessions().find((item) =>
+      const latestLocalSession = getSessions().find((item) =>
         restaurantId ? item.restaurantId === restaurantId : true,
       );
-      const nextSession = activeSession ?? latestSession ?? null;
+      const nextSession = activeSession ?? remoteSession ?? latestLocalSession ?? null;
       const defaultBatch =
         (nextSession?.batchId
           ? restaurantBatches.find((batch) => batch.id === nextSession.batchId)
@@ -73,6 +87,18 @@ export default function GerenteTablasPage() {
 
       setBatches(restaurantBatches);
       setSession(nextSession);
+      setLatestRemoteSession(remoteSession);
+      setEnabledDecks((restaurant?.enabledDecks?.length ? restaurant.enabledDecks : ["loteria"]) as DeckId[]);
+      setDebugSource(remoteSession ? "Supabase" : refreshedRestaurants.source);
+      console.info("[HOSTER LIVE][GERENTE TABLAS] debug", {
+        user: currentUser?.email ?? currentUser?.name,
+        restaurantId,
+        enabledDecks: restaurant?.enabledDecks,
+        activeGames: restaurant?.activeGames,
+        latestSessionId: nextSession?.id,
+        latestSessionDeckId: nextSession?.deckId,
+        source: remoteSession ? "Supabase" : refreshedRestaurants.source,
+      });
       if (defaultBatch) {
         setSelectedGameId(defaultBatch.gameId);
         setSelectedDeckId(defaultBatch.deckId);
@@ -84,34 +110,36 @@ export default function GerenteTablasPage() {
       }
     }
 
-    syncTablesState();
+    void syncTablesState();
 
-    const intervalId = globalThis.setInterval(syncTablesState, 900);
-    window.addEventListener("storage", syncTablesState);
+    const intervalId = globalThis.setInterval(() => void syncTablesState(), 2500);
+    const handleStorage = () => void syncTablesState();
+    window.addEventListener("storage", handleStorage);
 
     return () => {
       globalThis.clearInterval(intervalId);
-      window.removeEventListener("storage", syncTablesState);
+      window.removeEventListener("storage", handleStorage);
     };
-  }, [currentUser?.restaurantId]);
+  }, [currentUser?.email, currentUser?.name, currentUser?.restaurantId]);
 
   const availableDecks = useMemo(
     () =>
       Array.from(
         new Set(
-          batches
-            .filter((batch) => batch.gameId === selectedGameId)
-            .map((batch) => batch.deckId),
+          [
+            ...enabledDecks,
+            ...batches
+              .filter((batch) => batch.gameId === selectedGameId)
+              .map((batch) => batch.deckId),
+          ],
         ),
       ) as DeckId[],
-    [batches, selectedGameId],
+    [batches, enabledDecks, selectedGameId],
   );
 
   const availableBatches = useMemo(
     () =>
-      batches.filter(
-        (batch) => batch.gameId === selectedGameId && batch.deckId === selectedDeckId,
-      ),
+      batches.filter((batch) => batch.gameId === selectedGameId && batch.deckId === selectedDeckId),
     [batches, selectedDeckId, selectedGameId],
   );
 
@@ -204,7 +232,7 @@ export default function GerenteTablasPage() {
           <Card className="bg-bone/[0.045]">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-bone/45">Sesion</p>
             <p className="mt-2 font-display text-3xl text-bone">
-              {activeBatch ? activeBatch.status : "Sin lote"}
+              {session ? session.status : activeBatch ? activeBatch.status : "Sin lote"}
             </p>
           </Card>
           <Card className="bg-bone/[0.045]">
@@ -277,12 +305,18 @@ export default function GerenteTablasPage() {
           <div>
             <p className="text-bone/45">Deck activo</p>
             <p className="mt-1 font-semibold text-bone">
-              {activeBatch ? decks[activeBatch.deckId].label : "No disponible"}
+              {decks[(session?.deckId ?? activeBatch?.deckId ?? selectedDeckId) as DeckId]?.label ?? selectedDeckId}
             </p>
           </div>
           <div>
             <p className="text-bone/45">Lote activo</p>
             <p className="mt-1 font-semibold text-bone">{activeBatch?.name ?? "No disponible"}</p>
+          </div>
+          <div>
+            <p className="text-bone/45">Debug sync</p>
+            <p className="mt-1 font-semibold text-bone">
+              {debugSource} · {latestRemoteSession?.id.slice(0, 8) ?? session?.id.slice(0, 8) ?? "sin sesion"}
+            </p>
           </div>
         </div>
       </Card>

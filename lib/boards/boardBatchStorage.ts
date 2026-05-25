@@ -108,7 +108,7 @@ function createDefaultBatch(
   deckId: DeckId = "loteria",
 ): BoardBatch {
   const slug = normalizeRestaurantSlug(restaurantId);
-  const id = `batch-${slug}-default`;
+  const id = deckId === "loteria" ? `batch-${slug}-default` : `batch-${slug}-${deckId}-default`;
   const validFrom = "2026-05-01";
   const validTo = "2026-12-31";
 
@@ -130,7 +130,9 @@ function createDefaultBatch(
 
 export const defaultBoardBatches: BoardBatch[] = [
   createDefaultBatch("rancho-viejo", "Rancho Viejo", "Lote operativo Rancho Viejo"),
+  createDefaultBatch("rancho-viejo", "Rancho Viejo", "Lote FIFA Rancho Viejo", "worldcup2026"),
   createDefaultBatch("doroteo", "Doroteo", "Lote operativo Doroteo"),
+  createDefaultBatch("doroteo", "Doroteo", "Lote FIFA Doroteo", "worldcup2026"),
 ];
 
 function normalizeBatch(batch: BoardBatch): BoardBatch {

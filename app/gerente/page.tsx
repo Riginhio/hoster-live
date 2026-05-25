@@ -17,7 +17,7 @@ import {
   getActiveBoardBatchByDeck,
   type BoardBatch,
 } from "@/lib/boards/boardBatchStorage";
-import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
+import { refreshRestaurantsFromSupabase } from "@/lib/restaurants/restaurantStorage";
 import {
   getLastGameConfig,
   saveLastGameConfig,
@@ -140,13 +140,34 @@ export default function GerentePage() {
   const isPlay = venueRole === "play";
 
   useEffect(() => {
-    const loadedRestaurants = getRestaurants().filter((restaurant) => restaurant.isActive);
-    const restaurant = getFallbackRestaurant(loadedRestaurants, currentUser?.restaurantId);
+    let isMounted = true;
 
-    setRestaurants(loadedRestaurants);
-    setActiveBatch(restaurant ? getActiveBoardBatch(restaurant.id) ?? null : null);
-    setLastConfig(restaurant ? getLastGameConfig(restaurant.id) : null);
-  }, [currentUser?.restaurantId]);
+    async function syncRestaurants() {
+      const result = await refreshRestaurantsFromSupabase();
+      const loadedRestaurants = result.restaurants.filter((restaurant) => restaurant.isActive);
+      const restaurant = getFallbackRestaurant(loadedRestaurants, currentUser?.restaurantId);
+
+      if (!isMounted) {
+        return;
+      }
+
+      setRestaurants(loadedRestaurants);
+      setActiveBatch(restaurant ? getActiveBoardBatch(restaurant.id) ?? null : null);
+      setLastConfig(restaurant ? getLastGameConfig(restaurant.id) : null);
+      console.info("[HOSTER LIVE][GERENTE] debug", {
+        user: currentUser?.email ?? currentUser?.name,
+        restaurantId: currentUser?.restaurantId,
+        enabledDecks: restaurant?.enabledDecks,
+        activeGames: restaurant?.activeGames,
+        source: result.source,
+      });
+    }
+
+    void syncRestaurants();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.email, currentUser?.name, currentUser?.restaurantId]);
 
   useEffect(() => {
     if (!draftGame) {

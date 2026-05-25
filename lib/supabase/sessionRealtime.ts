@@ -429,6 +429,28 @@ export async function getLatestRealtimeSessionDebugByRestaurantId(
   return { data: data as RealtimeSessionDebugRow | null, error, mode: "supabase" };
 }
 
+export async function getLatestRealtimeSessionByRestaurantId(
+  restaurantId: string,
+): Promise<RealtimeResult<RealtimeGameSession>> {
+  const supabase = getSupabaseClient();
+  const slug = normalizeRestaurantSlug(restaurantId);
+
+  if (!supabase) {
+    return localResult();
+  }
+
+  const { data, error } = await supabase
+    .from("game_sessions")
+    .select("*")
+    .eq("restaurant_id", slug)
+    .order("last_updated_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return { data: data as RealtimeGameSession | null, error, mode: "supabase" };
+}
+
 export function subscribeToRestaurantSession(
   restaurantId: string,
   onChange: (session: RealtimeGameSession | null) => void,

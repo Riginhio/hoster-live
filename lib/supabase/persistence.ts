@@ -4,6 +4,7 @@ import type { RestaurantConfig } from "@/lib/types";
 import type { Session } from "@/lib/sessions/sessionStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 import { normalizeDeckId } from "@/lib/decks";
+import type { BusinessType } from "@/lib/types";
 
 export type SupabasePersistenceResult<T> = {
   data: T | null;
@@ -95,6 +96,104 @@ function restaurantPayload(restaurant: RestaurantConfig) {
   };
 }
 
+function asStringArray(value: unknown, fallback: string[] = []) {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : fallback;
+}
+
+function asNumberArray(value: unknown, fallback: number[] = []) {
+  return Array.isArray(value) && value.every((item) => typeof item === "number")
+    ? value
+    : fallback;
+}
+
+function restaurantFromRow(row: Record<string, unknown>): RestaurantConfig {
+  const primaryColor = String(row.primary_color ?? "#d9a441");
+  const secondaryColor = String(row.secondary_color ?? "#1fa187");
+  const businessType = String(row.business_type ?? "restaurante_bar") as BusinessType;
+  const enabledDecks = asStringArray(row.enabled_decks, ["loteria"]).map(normalizeDeckId);
+  const allowedPrices = asNumberArray(row.allowed_prices, [100, 150, 200, 300]);
+  const rawDefaultTablePrice = Number(row.default_table_price);
+  const defaultTablePrice =
+    Number.isFinite(rawDefaultTablePrice) && allowedPrices.includes(rawDefaultTablePrice)
+      ? rawDefaultTablePrice
+      : allowedPrices[0] ?? 100;
+
+  return {
+    id: normalizeRestaurantSlug(String(row.id ?? row.slug ?? row.name ?? "rancho-viejo")),
+    slug: normalizeRestaurantSlug(String(row.slug ?? row.id ?? row.name ?? "rancho-viejo")),
+    name: String(row.name ?? "Rancho Viejo"),
+    logoUrl: String(row.logo_url ?? ""),
+    active: Boolean(row.active ?? true),
+    isActive: Boolean(row.is_active ?? row.active ?? true),
+    businessType,
+    managerName: String(row.manager_name ?? ""),
+    managerWhatsapp: String(row.manager_whatsapp ?? ""),
+    managerEmail: String(row.manager_email ?? ""),
+    ownerName: String(row.owner_name ?? ""),
+    ownerWhatsapp: String(row.owner_whatsapp ?? ""),
+    address: String(row.address ?? ""),
+    googleMapsUrl: String(row.google_maps_url ?? ""),
+    instagramUrl: String(row.instagram_url ?? ""),
+    facebookUrl: String(row.facebook_url ?? ""),
+    tiktokUrl: String(row.tiktok_url ?? ""),
+    averageHostesses: Number(row.average_hostesses ?? 0),
+    strongDays: asStringArray(row.strong_days),
+    estimatedGamesPerWeek: Number(row.estimated_games_per_week ?? 0),
+    audienceType: asStringArray(row.audience_type, ["Mixto / general"]),
+    audienceNotes: String(row.audience_notes ?? ""),
+    notes: String(row.notes ?? ""),
+    restaurantCommissionPercent: Number(row.restaurant_commission_percent ?? 0),
+    hlCommissionMode: row.hl_commission_mode === "percent" ? "percent" : "fixed",
+    hlCommissionValue: Number(row.hl_commission_value ?? row.hl_fixed_fee ?? 0),
+    hlFixedFee: Number(row.hl_fixed_fee ?? 0),
+    accumulatedEnabled: Boolean(row.accumulated_enabled ?? false),
+    accumulatedAmountPerGame: Number(row.accumulated_amount_per_game ?? 0),
+    accumulatedDay: (String(row.accumulated_day ?? "lunes") as RestaurantConfig["accumulatedDay"]),
+    accumulatedTablePrice: Number(row.accumulated_table_price ?? 300),
+    accumulatedTableCount: Number(row.accumulated_table_count ?? 30),
+    activeDeck: normalizeDeckId(String(row.active_deck ?? enabledDecks[0] ?? "loteria")),
+    commissionPercent: Number(row.commission_percent ?? row.commission_restaurant_percent ?? 0),
+    commissionHLPercent: Number(row.commission_hl_percent ?? 0),
+    commissionRestaurantPercent: Number(row.commission_restaurant_percent ?? row.restaurant_commission_percent ?? 0),
+    allowedTableCounts: asNumberArray(row.allowed_table_counts, [30, 50]),
+    allowedPrices,
+    defaultTablePrice,
+    allowedModes: asStringArray(row.allowed_modes, ["four_corners"]) as RestaurantConfig["allowedModes"],
+    enabledGames: asStringArray(row.enabled_games, ["loteria"]),
+    activeGames: asStringArray(row.active_games, ["loteria"]) as RestaurantConfig["activeGames"],
+    enabledDecks,
+    primaryColor,
+    secondaryColor,
+    accentColor: String(row.accent_color ?? "#c0392b"),
+    autoplayDefault: Boolean(row.autoplay_default ?? true),
+    autoplayInterval: Number(row.autoplay_interval ?? 5000),
+    showClock: Boolean(row.show_clock ?? true),
+    showSponsors: Boolean(row.show_sponsors ?? true),
+    showPromotions: Boolean(row.show_promotions ?? true),
+    showQRPromo: Boolean(row.show_qr_promo ?? true),
+    promoTitle: String(row.promo_title ?? ""),
+    promoSubtitle: String(row.promo_subtitle ?? ""),
+    promoImageUrl: String(row.promo_image_url ?? ""),
+    standbyTitle: String(row.standby_title ?? ""),
+    standbySubtitle: String(row.standby_subtitle ?? ""),
+    standbyImageUrl: String(row.standby_image_url ?? ""),
+    standbyPromoText: String(row.standby_promo_text ?? ""),
+    standbyCtaText: String(row.standby_cta_text ?? ""),
+    standbyCtaQrUrl: String(row.standby_cta_qr_url ?? ""),
+    standbyRotatePromotions: Boolean(row.standby_rotate_promotions ?? true),
+    instagram: String(row.instagram ?? row.instagram_url ?? ""),
+    facebook: String(row.facebook ?? row.facebook_url ?? ""),
+    tiktok: String(row.tiktok ?? row.tiktok_url ?? ""),
+    qrCampaignId: String(row.qr_campaign_id ?? ""),
+    theme: {
+      primaryColor,
+      secondaryColor,
+    },
+  };
+}
+
 function managerUserPayload(user: ManagerUser) {
   return {
     id: user.id,
@@ -176,6 +275,25 @@ export async function upsertRestaurantsToSupabase(restaurants: RestaurantConfig[
   ).select();
 
   return { data: (data as RestaurantConfig[] | null) ?? null, error: error ? toError(error) : null, mode: "supabase" as const };
+}
+
+export async function getRestaurantsFromSupabase() {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return localResult<RestaurantConfig[]>();
+  }
+
+  const { data, error } = await supabase
+    .from("restaurants")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  return {
+    data: data ? (data as Record<string, unknown>[]).map(restaurantFromRow) : null,
+    error: error ? toError(error) : null,
+    mode: "supabase" as const,
+  };
 }
 
 export async function upsertManagerUsersToSupabase(users: ManagerUser[]) {

@@ -1,7 +1,7 @@
 import type { BusinessType, RestaurantConfig } from "@/lib/types";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 import { normalizeDeckId, type GameId } from "@/lib/decks";
-import { upsertRestaurantsToSupabase } from "@/lib/supabase/persistence";
+import { getRestaurantsFromSupabase, upsertRestaurantsToSupabase } from "@/lib/supabase/persistence";
 
 export const restaurantsStorageKey = "loteria:restaurants";
 
@@ -405,6 +405,24 @@ export function saveRestaurants(restaurants: RestaurantConfig[]) {
   window.localStorage.setItem(restaurantsStorageKey, JSON.stringify(normalizedRestaurants));
   void upsertRestaurantsToSupabase(normalizedRestaurants);
   return normalizedRestaurants;
+}
+
+export async function refreshRestaurantsFromSupabase() {
+  const result = await getRestaurantsFromSupabase();
+
+  if (result.mode !== "supabase" || result.error || !result.data?.length) {
+    return {
+      restaurants: getRestaurants(),
+      source: result.mode === "supabase" ? "localStorage" : "localStorage",
+      error: result.error,
+    };
+  }
+
+  return {
+    restaurants: saveRestaurants(result.data),
+    source: "Supabase",
+    error: null,
+  };
 }
 
 export function createRestaurant(

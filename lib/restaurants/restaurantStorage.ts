@@ -4,6 +4,7 @@ import {
   defaultRestaurants,
   getRestaurantById,
   getRestaurants,
+  refreshRestaurantsFromSupabase,
   toggleRestaurant,
   updateRestaurant,
 } from "@/lib/storage/restaurants";
@@ -14,6 +15,7 @@ export {
   defaultRestaurants,
   getRestaurantById,
   getRestaurants,
+  refreshRestaurantsFromSupabase,
   toggleRestaurant,
   updateRestaurant,
 };

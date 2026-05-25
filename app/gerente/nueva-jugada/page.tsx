@@ -15,7 +15,7 @@ import {
   parseStoredDemoConfig,
   type DemoGameConfig,
 } from "@/lib/demoConfig";
-import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
+import { getRestaurants, refreshRestaurantsFromSupabase } from "@/lib/restaurants/restaurantStorage";
 import type { RestaurantConfig } from "@/lib/types";
 import { calculateFinancialBreakdown } from "@/lib/finance";
 import { cancelSession, createSession } from "@/lib/sessions/sessionStorage";
@@ -102,8 +102,12 @@ export default function NuevaJugadaPage() {
   );
 
   useEffect(() => {
-    try {
-      const loadedRestaurants = getRestaurants().filter((restaurant) => restaurant.isActive);
+    let isMounted = true;
+
+    async function syncRestaurants() {
+      try {
+      const refreshResult = await refreshRestaurantsFromSupabase();
+      const loadedRestaurants = refreshResult.restaurants.filter((restaurant) => restaurant.isActive);
       const managerRestaurant =
         loadedRestaurants.find((restaurant) => restaurant.id === currentUser?.restaurantId) ??
         loadedRestaurants[0];
@@ -113,6 +117,10 @@ export default function NuevaJugadaPage() {
         managerRestaurant?.id ?? currentUser?.restaurantId,
       );
 
+      if (!isMounted) {
+        return;
+      }
+
       setRestaurants(loadedRestaurants);
       setConfig(
         managerRestaurant && loadedConfig.restaurantId !== managerRestaurant.id
@@ -120,11 +128,27 @@ export default function NuevaJugadaPage() {
           : loadedConfig,
       );
       setSelectedDeckId(managerRestaurant?.enabledDecks[0] ?? managerRestaurant?.activeDeck ?? "loteria");
-    } catch {
-      setRestaurants(getRestaurants());
-      setConfig(createDefaultDemoConfig(currentUser?.restaurantId));
+      console.info("[HOSTER LIVE][GERENTE NUEVA] debug", {
+        user: currentUser?.email ?? currentUser?.name,
+        restaurantId: currentUser?.restaurantId,
+        enabledDecks: managerRestaurant?.enabledDecks,
+        activeGames: managerRestaurant?.activeGames,
+        source: refreshResult.source,
+      });
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+        setRestaurants(getRestaurants());
+        setConfig(createDefaultDemoConfig(currentUser?.restaurantId));
+      }
     }
-  }, [currentUser?.restaurantId]);
+
+    void syncRestaurants();
+    return () => {
+      isMounted = false;
+    }
+  }, [currentUser?.email, currentUser?.name, currentUser?.restaurantId]);
 
   const financialBreakdown = calculateFinancialBreakdown({
     activeTables: config.activeTables,

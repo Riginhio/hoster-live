@@ -52,6 +52,8 @@ import { getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
   closeRealtimeSession,
   createRealtimeSession,
+  getLatestRealtimeSessionByRestaurantId,
+  realtimeSessionToSession,
   type RealtimeSessionUpdate,
   updateRealtimeSession,
 } from "@/lib/supabase/sessionRealtime";
@@ -181,6 +183,7 @@ export default function JugadaActivaPage() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [tvSyncStatus, setTvSyncStatus] = useState<"idle" | "syncing" | "sent" | "warning" | "reconnecting">("idle");
   const [lastImageTimingCardId, setLastImageTimingCardId] = useState("");
+  const [syncSource, setSyncSource] = useState("localStorage");
   const previousDeckIdRef = useRef<string | undefined>(undefined);
   const supabaseStatus = getSupabaseConfigStatus();
 
@@ -250,7 +253,7 @@ export default function JugadaActivaPage() {
     });
   }, [currentCard]);
 
-  const syncActiveSession = useCallback(() => {
+  const syncActiveSession = useCallback(async () => {
     if (!restaurantId) {
       setSession(null);
       setActiveBatch(null);
@@ -259,9 +262,17 @@ export default function JugadaActivaPage() {
       return;
     }
 
+    const remoteResult = await getLatestRealtimeSessionByRestaurantId(restaurantId);
+    const remoteSession = remoteResult.data ? realtimeSessionToSession(remoteResult.data) : null;
     const activeSession = session?.id ? getSessionById(session.id) : getActiveSession(restaurantId);
+    const latestLocalSession =
+      getActiveSession(restaurantId) ??
+      (session?.id ? getSessionById(session.id) : undefined) ??
+      null;
     const normalizedSession =
-      activeSession?.status === "active" ? activeSession : getActiveSession(restaurantId) ?? null;
+      activeSession?.status === "active"
+        ? activeSession
+        : remoteSession ?? latestLocalSession ?? null;
 
     setSession(normalizedSession);
     setActiveBatch(normalizedSession ? getBatchForSession(normalizedSession) : null);
@@ -269,16 +280,26 @@ export default function JugadaActivaPage() {
       normalizedSession ? hydrateSessionCards(normalizedSession.calledCards, normalizedSession.deckId) : [],
     );
     setWinner(getWinnerFromSession(normalizedSession));
+    setSyncSource(remoteSession ? "Supabase" : "localStorage");
+    console.info("[HOSTER LIVE][GERENTE ACTIVA] debug", {
+      user: currentUser?.email ?? currentUser?.name,
+      restaurantId,
+      latestSessionId: normalizedSession?.id,
+      latestSessionDeckId: normalizedSession?.deckId,
+      latestSessionStatus: normalizedSession?.status,
+      source: remoteSession ? "Supabase" : "localStorage",
+    });
 
-  }, [restaurantId, session?.id]);
+  }, [currentUser?.email, currentUser?.name, restaurantId, session?.id]);
 
   useEffect(() => {
-    syncActiveSession();
-    const intervalId = globalThis.setInterval(syncActiveSession, 900);
-    window.addEventListener("storage", syncActiveSession);
+    void syncActiveSession();
+    const intervalId = globalThis.setInterval(() => void syncActiveSession(), 2500);
+    const handleStorage = () => void syncActiveSession();
+    window.addEventListener("storage", handleStorage);
     return () => {
       globalThis.clearInterval(intervalId);
-      window.removeEventListener("storage", syncActiveSession);
+      window.removeEventListener("storage", handleStorage);
     };
   }, [syncActiveSession]);
 
@@ -406,7 +427,7 @@ export default function JugadaActivaPage() {
           playStartedAt: updatedSession.playStartedAt,
         });
       }
-      syncActiveSession();
+      void syncActiveSession();
     }
   }, [autoplayStatus, countdownRemaining, session?.id, syncActiveSession]);
 
@@ -500,7 +521,7 @@ export default function JugadaActivaPage() {
         autoplayStartedAt: updatedSession.autoplayStartedAt,
       });
     }
-    syncActiveSession();
+    void syncActiveSession();
   }
 
   function startAutoplayDirect() {
@@ -521,7 +542,7 @@ export default function JugadaActivaPage() {
         playStartedAt: updatedSession.playStartedAt,
       });
     }
-    syncActiveSession();
+    void syncActiveSession();
   }
 
   function pauseAutoplay() {
@@ -537,7 +558,7 @@ export default function JugadaActivaPage() {
         autoplayStatus: updatedSession.autoplayStatus,
       });
     }
-    syncActiveSession();
+    void syncActiveSession();
   }
 
   function resumeAutoplay() {
@@ -555,7 +576,7 @@ export default function JugadaActivaPage() {
         autoplayStartedAt: updatedSession.autoplayStartedAt,
       });
     }
-    syncActiveSession();
+    void syncActiveSession();
   }
 
   if (!session) {
@@ -573,6 +594,53 @@ export default function JugadaActivaPage() {
           <ButtonLink href="/gerente" className="mt-6">
             Ir al panel rapido
           </ButtonLink>
+        </Card>
+      </Layout>
+    );
+  }
+
+  if (session.status !== "active") {
+    const finalStatusLabel =
+      session.status === "completed"
+        ? "Jugada finalizada"
+        : session.status === "cancelled"
+          ? "Jugada cancelada"
+          : "Cerrada sin ganador";
+
+    return (
+      <Layout title="Jugada activa" eyebrow="HOSTER LIVE">
+        <Card accent className="mx-auto max-w-4xl">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.26em] text-mezcal">
+                {finalStatusLabel}
+              </p>
+              <h2 className="mt-2 font-display text-5xl text-bone">{session.restaurantName}</h2>
+              <p className="mt-2 text-sm font-semibold text-bone/60">
+                Source: {syncSource} · Session {session.id.slice(0, 12)}
+              </p>
+            </div>
+            <ButtonLink href="/gerente" variant="secondary">
+              Volver al panel
+            </ButtonLink>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <InfoTile label="Deck" value={decks[session.deckId]?.label ?? session.deckId} />
+            <InfoTile label="Lote" value={activeBatch?.name ?? "Sin lote local"} />
+            <InfoTile label="Ganador" value={session.winnerFolio ?? "Sin ganador"} />
+            <InfoTile label="Cartas" value={`${calledCards.length}/${deckSize}`} />
+            <InfoTile label="Modalidad" value={modeLabels[session.mode]} />
+            <InfoTile label="Premio" value={formatCurrency(session.prizeAmount)} />
+            <InfoTile label="Estado" value={session.status} />
+            <InfoTile label="Actualizada" value={new Date(session.lastUpdatedAt).toLocaleString("es-MX")} />
+          </div>
+          {calledCards.length ? (
+            <div className="mt-6 grid grid-cols-3 gap-2 sm:grid-cols-6 md:grid-cols-9">
+              {calledCards.slice(-18).reverse().map((card) => (
+                <MiniCard key={card.id} card={card} />
+              ))}
+            </div>
+          ) : null}
         </Card>
       </Layout>
     );
@@ -845,7 +913,7 @@ export default function JugadaActivaPage() {
                         autoplayIntervalSeconds: updatedSession.autoplayIntervalSeconds,
                       });
                     }
-                    syncActiveSession();
+                    void syncActiveSession();
                   }
                 }}
                 disabled={autoplayStatus !== "idle"}
