@@ -184,6 +184,30 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function parseMoneyValue(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : NaN;
+  }
+
+  if (typeof value !== "string") {
+    return NaN;
+  }
+
+  const normalizedValue = value.replace(/[$,\s]/g, "");
+  return normalizedValue ? Number(normalizedValue) : NaN;
+}
+
+function normalizeMoneyArray(values: unknown[]) {
+  return Array.from(
+    new Set(
+      values
+        .map(parseMoneyValue)
+        .filter((value) => Number.isFinite(value))
+        .map((value) => Math.round(value)),
+    ),
+  ).sort((left, right) => left - right);
+}
+
 function getBusinessTypeLabel(value: BusinessType) {
   return businessTypeOptions.find((option) => option.value === value)?.label ?? "Otro";
 }
@@ -197,9 +221,12 @@ function getGameLabel(value: string) {
 }
 
 function toggleNumberValue(values: number[], value: number) {
-  return values.includes(value)
-    ? values.filter((currentValue) => currentValue !== value)
-    : [...values, value].sort((left, right) => left - right);
+  const normalizedValues = normalizeMoneyArray(values);
+  const normalizedValue = parseMoneyValue(value);
+
+  return normalizedValues.includes(normalizedValue)
+    ? normalizedValues.filter((currentValue) => currentValue !== normalizedValue)
+    : [...normalizedValues, normalizedValue].sort((left, right) => left - right);
 }
 
 function toggleStringValue(values: string[], value: string) {
@@ -267,7 +294,9 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     tiktok: restaurant.tiktok,
     qrCampaignId: restaurant.qrCampaignId,
     allowedPrices: restaurant.allowedPrices,
-    defaultTablePrice: String(restaurant.defaultTablePrice ?? restaurant.allowedPrices[0] ?? 100),
+    defaultTablePrice: String(
+      parseMoneyValue(restaurant.defaultTablePrice ?? restaurant.allowedPrices[0] ?? 100),
+    ),
     allowedModes: restaurant.allowedModes,
     allowedTableCounts: restaurant.allowedTableCounts,
     enabledGames: restaurant.activeGames,
@@ -279,9 +308,10 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
 function validateForm(formState: RestaurantFormState) {
   const restaurantCommissionPercent = Number(formState.restaurantCommissionPercent);
   const hlCommissionValue = Number(formState.hlCommissionValue);
-  const accumulatedAmountPerGame = Number(formState.accumulatedAmountPerGame);
-  const accumulatedTablePrice = Number(formState.accumulatedTablePrice);
+  const accumulatedAmountPerGame = parseMoneyValue(formState.accumulatedAmountPerGame);
+  const accumulatedTablePrice = parseMoneyValue(formState.accumulatedTablePrice);
   const accumulatedTableCount = Number(formState.accumulatedTableCount);
+  const allowedPrices = normalizeMoneyArray(formState.allowedPrices);
 
   if (!formState.name.trim()) {
     return "El nombre del restaurante es obligatorio.";
@@ -310,21 +340,21 @@ function validateForm(formState: RestaurantFormState) {
     return "El monto acumulado por jugada debe ser valido.";
   }
 
-  if (formState.allowedPrices.length === 0) {
+  if (allowedPrices.length === 0) {
     return "Selecciona al menos un costo permitido.";
   }
 
-  const defaultTablePrice = Number(formState.defaultTablePrice);
+  const defaultTablePrice = parseMoneyValue(formState.defaultTablePrice);
 
-  if (!Number.isFinite(defaultTablePrice) || !formState.allowedPrices.includes(defaultTablePrice)) {
+  if (!Number.isFinite(defaultTablePrice) || !allowedPrices.includes(defaultTablePrice)) {
     return "El costo default debe estar dentro de los costos permitidos.";
   }
 
-  if (formState.accumulatedEnabled && !formState.allowedPrices.includes(accumulatedTablePrice)) {
+  if (formState.accumulatedEnabled && !allowedPrices.includes(accumulatedTablePrice)) {
     return "El costo de tabla acumulado debe estar dentro de los costos permitidos.";
   }
 
-  if (formState.allowedPrices.some((price) => price % 50 !== 0)) {
+  if (allowedPrices.some((price) => price % 50 !== 0)) {
     return "Todos los precios deben ser multiplos de 50.";
   }
 
@@ -503,6 +533,10 @@ export default function RestaurantesPage() {
     const normalizedActiveDeck = normalizedEnabledDecks.includes(formState.activeDeck)
       ? formState.activeDeck
       : normalizedEnabledDecks[0];
+    const normalizedAllowedPrices = normalizeMoneyArray(formState.allowedPrices);
+    const normalizedDefaultTablePrice = parseMoneyValue(formState.defaultTablePrice);
+    const normalizedAccumulatedAmountPerGame = parseMoneyValue(formState.accumulatedAmountPerGame);
+    const normalizedAccumulatedTablePrice = parseMoneyValue(formState.accumulatedTablePrice);
 
     const payload = {
       name: formState.name.trim(),
@@ -531,9 +565,9 @@ export default function RestaurantesPage() {
       hlFixedFee:
         formState.hlCommissionMode === "fixed" ? Number(formState.hlCommissionValue) : 0,
       accumulatedEnabled: formState.accumulatedEnabled,
-      accumulatedAmountPerGame: Number(formState.accumulatedAmountPerGame),
+      accumulatedAmountPerGame: normalizedAccumulatedAmountPerGame,
       accumulatedDay: formState.accumulatedDay,
-      accumulatedTablePrice: Number(formState.accumulatedTablePrice),
+      accumulatedTablePrice: normalizedAccumulatedTablePrice,
       accumulatedTableCount: Number(formState.accumulatedTableCount),
       activeDeck: normalizedActiveDeck,
       commissionHLPercent:
@@ -563,8 +597,8 @@ export default function RestaurantesPage() {
       facebook: formState.facebook.trim(),
       tiktok: formState.tiktok.trim(),
       qrCampaignId: formState.qrCampaignId.trim(),
-      allowedPrices: formState.allowedPrices,
-      defaultTablePrice: Number(formState.defaultTablePrice),
+      allowedPrices: normalizedAllowedPrices,
+      defaultTablePrice: normalizedDefaultTablePrice,
       allowedModes: formState.allowedModes,
       allowedTableCounts: formState.allowedTableCounts,
       enabledGames: normalizedActiveGames,
@@ -1567,7 +1601,7 @@ export default function RestaurantesPage() {
                     onChange={(event) =>
                       setFormState((currentState) => ({
                         ...currentState,
-                        accumulatedTablePrice: event.target.value,
+                        accumulatedTablePrice: String(parseMoneyValue(event.target.value)),
                       }))
                     }
                     className={inputClassName}
@@ -1699,7 +1733,7 @@ export default function RestaurantesPage() {
                   <p className="text-sm font-semibold text-bone">Costos permitidos</p>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {priceOptions.map((price) => {
-                      const selected = formState.allowedPrices.includes(price);
+                      const selected = normalizeMoneyArray(formState.allowedPrices).includes(price);
 
                       return (
                         <button
@@ -1730,13 +1764,13 @@ export default function RestaurantesPage() {
                   <label className="mt-3 grid gap-2 sm:max-w-xs">
                     <span className="text-sm font-semibold text-bone">Costo default</span>
                     <select
-                      value={formState.defaultTablePrice}
-                      onChange={(event) =>
-                        setFormState((currentState) => ({
-                          ...currentState,
-                          defaultTablePrice: event.target.value,
-                        }))
-                      }
+                    value={formState.defaultTablePrice}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                          defaultTablePrice: String(parseMoneyValue(event.target.value)),
+                      }))
+                    }
                       className={inputClassName}
                     >
                       {formState.allowedPrices.map((price) => (
