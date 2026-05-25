@@ -493,7 +493,11 @@ export function updateSession(
   return updatedSession;
 }
 
-export function closeSession(sessionId: string, updates: Partial<Omit<Session, "id">> = {}) {
+export function closeSession(
+  sessionId: string,
+  updates: Partial<Omit<Session, "id">> = {},
+  options: { syncSupabase?: boolean } = {},
+) {
   const session = getSessionById(sessionId);
 
   if (!session) {
@@ -514,7 +518,7 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
       (updates.durationSeconds ??
       session.durationSeconds) ||
       calculatePlayDurationSeconds(session, endedAt),
-  });
+  }, options);
 
   if (closedSession?.status === "completed") {
     void import("@/lib/accumulated/accumulatedStorage").then(
@@ -526,7 +530,7 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
   return closedSession;
 }
 
-export function cancelSession(sessionId: string) {
+export function cancelSession(sessionId: string, options: { syncSupabase?: boolean } = {}) {
   const session = getSessionById(sessionId);
 
   if (!session) {
@@ -541,7 +545,7 @@ export function cancelSession(sessionId: string) {
     autoplayStatus: "finished",
     playEndedAt: session.playEndedAt ?? endedAt,
     durationSeconds: session.durationSeconds || calculatePlayDurationSeconds(session, endedAt),
-  });
+  }, options);
 }
 
 export function getActiveSessionByRestaurantId(restaurantId: string) {

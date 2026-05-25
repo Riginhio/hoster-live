@@ -7,6 +7,7 @@ import { normalizeDeckId } from "@/lib/decks";
 
 export type RealtimeGameSession = {
   id: string;
+  batch_id: string | null;
   restaurant_id: string;
   restaurant_name: string;
   status: string;
@@ -45,6 +46,7 @@ export type RealtimeGameSession = {
   autoplay_started_at: string | null;
   play_started_at: string | null;
   play_ended_at: string | null;
+  ended_at: string | null;
   active_promotions: Session["activePromotions"];
   operator_user_id: string | null;
   operator_username: string | null;
@@ -97,6 +99,7 @@ export type RealtimeSessionUpdate = Partial<
     | "autoplayStartedAt"
     | "playStartedAt"
     | "playEndedAt"
+    | "endedAt"
     | "activePromotions"
     | "operatorUserId"
     | "operatorUsername"
@@ -111,6 +114,7 @@ function toRealtimePayload(session: Session) {
 
   return {
     id: session.id,
+    batch_id: session.batchId ?? null,
     restaurant_id: restaurantId,
     restaurant_name: session.restaurantName,
     status: session.status,
@@ -149,6 +153,7 @@ function toRealtimePayload(session: Session) {
     autoplay_started_at: session.autoplayStartedAt ?? null,
     play_started_at: session.playStartedAt ?? null,
     play_ended_at: session.playEndedAt ?? null,
+    ended_at: session.endedAt ?? null,
     active_promotions: session.activePromotions ?? [],
     operator_user_id: session.operatorUserId ?? null,
     operator_username: session.operatorUsername ?? null,
@@ -180,6 +185,7 @@ function toRealtimeUpdate(updates: RealtimeSessionUpdate) {
       : {}),
     ...(updates.playStartedAt !== undefined ? { play_started_at: updates.playStartedAt ?? null } : {}),
     ...(updates.playEndedAt !== undefined ? { play_ended_at: updates.playEndedAt ?? null } : {}),
+    ...(updates.endedAt !== undefined ? { ended_at: updates.endedAt ?? null } : {}),
     ...(updates.activePromotions ? { active_promotions: updates.activePromotions } : {}),
     ...(updates.operatorUserId !== undefined
       ? { operator_user_id: updates.operatorUserId ?? null }
@@ -196,10 +202,12 @@ function toRealtimeUpdate(updates: RealtimeSessionUpdate) {
 export function realtimeSessionToSession(row: RealtimeGameSession): Session {
   return {
     id: row.id,
+    batchId: row.batch_id ?? undefined,
     restaurantId: row.restaurant_id,
     restaurantName: row.restaurant_name,
     createdAt: row.created_at,
     startedAt: row.created_at,
+    endedAt: row.ended_at ?? undefined,
     lastUpdatedAt: row.last_updated_at,
     deckId: normalizeDeckId(row.deck_id ?? undefined),
     mode: row.mode as WinMode,
@@ -538,13 +546,44 @@ export async function closeRealtimeSession(
   sessionId: string,
   updates: RealtimeSessionUpdate = {},
 ): Promise<RealtimeResult<RealtimeGameSession>> {
+  const supabase = getSupabaseClient();
   const now = new Date().toISOString();
 
-  return updateRealtimeSession(sessionId, {
+  if (!supabase) {
+    return localResult();
+  }
+
+  const nextStatus = updates.status ?? "completed";
+  const payload = toRealtimeUpdate({
     ...updates,
-    status: updates.status ?? "completed",
+    status: nextStatus,
     autoplayStatus: "finished",
+    endedAt: updates.endedAt ?? now,
     playEndedAt: updates.playEndedAt ?? now,
     lastUpdatedAt: now,
   });
+
+  const { data, error } = await supabase
+    .from("game_sessions")
+    .update(payload)
+    .eq("id", sessionId)
+    .not("status", "in", `(${terminalSessionStatuses.join(",")})`)
+    .select()
+    .maybeSingle();
+
+  if (data || error) {
+    return { data: data as RealtimeGameSession | null, error, mode: "supabase" };
+  }
+
+  const current = await supabase
+    .from("game_sessions")
+    .select("*")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  return {
+    data: current.data as RealtimeGameSession | null,
+    error: current.error,
+    mode: "supabase",
+  };
 }

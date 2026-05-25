@@ -36,7 +36,7 @@ import {
 } from "@/lib/audio/gameAudio";
 import { getSupabaseClientDebugStatus, getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
-  getActiveRealtimeSessionByRestaurantId,
+  getLatestRealtimeSessionByRestaurantId,
   getLatestRealtimeSessionDebugByRestaurantId,
   realtimeSessionToSession,
   subscribeToRestaurantSession,
@@ -427,7 +427,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     async function queryRealtimeSession() {
       try {
         const [result, debugResult] = await Promise.all([
-          getActiveRealtimeSessionByRestaurantId(realtimeRestaurantId),
+          getLatestRealtimeSessionByRestaurantId(realtimeRestaurantId),
           getLatestRealtimeSessionDebugByRestaurantId(realtimeRestaurantId),
         ]);
 

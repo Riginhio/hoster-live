@@ -136,6 +136,23 @@ function getWinnerFromSession(session: Session | null): WinnerState | null {
   };
 }
 
+function getSessionTime(session?: Session | null) {
+  const time = session?.lastUpdatedAt ? new Date(session.lastUpdatedAt).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function chooseNewestSession(remoteSession: Session | null, localSession?: Session | null) {
+  if (!remoteSession) {
+    return localSession ?? null;
+  }
+
+  if (!localSession) {
+    return remoteSession;
+  }
+
+  return getSessionTime(remoteSession) >= getSessionTime(localSession) ? remoteSession : localSession;
+}
+
 function syncRealtimeFromSession(
   session: Session,
   updates: RealtimeSessionUpdate,
@@ -184,6 +201,7 @@ export default function JugadaActivaPage() {
   const [tvSyncStatus, setTvSyncStatus] = useState<"idle" | "syncing" | "sent" | "warning" | "reconnecting">("idle");
   const [lastImageTimingCardId, setLastImageTimingCardId] = useState("");
   const [syncSource, setSyncSource] = useState("localStorage");
+  const [sessionActionError, setSessionActionError] = useState("");
   const previousDeckIdRef = useRef<string | undefined>(undefined);
   const supabaseStatus = getSupabaseConfigStatus();
 
@@ -269,10 +287,7 @@ export default function JugadaActivaPage() {
       getActiveSession(restaurantId) ??
       (session?.id ? getSessionById(session.id) : undefined) ??
       null;
-    const normalizedSession =
-      activeSession?.status === "active"
-        ? activeSession
-        : remoteSession ?? latestLocalSession ?? null;
+    const normalizedSession = chooseNewestSession(remoteSession, activeSession ?? latestLocalSession);
 
     setSession(normalizedSession);
     setActiveBatch(normalizedSession ? getBatchForSession(normalizedSession) : null);
@@ -280,14 +295,14 @@ export default function JugadaActivaPage() {
       normalizedSession ? hydrateSessionCards(normalizedSession.calledCards, normalizedSession.deckId) : [],
     );
     setWinner(getWinnerFromSession(normalizedSession));
-    setSyncSource(remoteSession ? "Supabase" : "localStorage");
+    setSyncSource(remoteSession && normalizedSession?.id === remoteSession.id ? "Supabase" : "localStorage");
     console.info("[HOSTER LIVE][GERENTE ACTIVA] debug", {
       user: currentUser?.email ?? currentUser?.name,
       restaurantId,
       latestSessionId: normalizedSession?.id,
       latestSessionDeckId: normalizedSession?.deckId,
       latestSessionStatus: normalizedSession?.status,
-      source: remoteSession ? "Supabase" : "localStorage",
+      source: remoteSession && normalizedSession?.id === remoteSession.id ? "Supabase" : "localStorage",
     });
 
   }, [currentUser?.email, currentUser?.name, restaurantId, session?.id]);
@@ -443,53 +458,97 @@ export default function JugadaActivaPage() {
     return () => globalThis.clearInterval(intervalId);
   }, [advanceSession, autoplayStatus, intervalMs, session?.autoplayIntervalSeconds, session?.id, winner]);
 
-  function closeActiveSession() {
+  async function closeActiveSession() {
     if (!session) {
       return;
     }
 
-    const closedSession = closeSession(session.id, {
+    setSessionActionError("");
+    setTvSyncStatus("syncing");
+    const endedAt = new Date().toISOString();
+    const nextStatus = session.winnerFolio ? "completed" : "closed_without_winner";
+    const durationSeconds = session.durationSeconds || getPlayElapsedSeconds(session);
+    const remoteUpdates = {
+      status: nextStatus,
       calledCards: session.calledCards,
       winnerFolio: session.winnerFolio,
       winnerCards: session.winnerCards,
       autoplayStatus: "finished",
+      endedAt,
+      playEndedAt: session.playEndedAt ?? endedAt,
+      durationSeconds,
+    } satisfies RealtimeSessionUpdate;
+
+    const result = await closeRealtimeSession(session.id, remoteUpdates);
+    console.info("[HOSTER LIVE][GERENTE ACTIVA] cierre sesion", {
+      sessionId: session.id,
+      previousStatus: session.status,
+      nextStatus,
+      supabaseMode: result.mode,
+      supabaseError: result.error?.message ?? null,
+      supabaseStatus: result.data?.status ?? null,
     });
-    if (closedSession) {
-      void closeRealtimeSession(closedSession.id, {
-        status: closedSession.status,
-        calledCards: closedSession.calledCards,
-        winnerFolio: closedSession.winnerFolio,
-        winnerCards: closedSession.winnerCards,
-        playEndedAt: closedSession.playEndedAt,
-        durationSeconds: closedSession.durationSeconds,
-        lastUpdatedAt: closedSession.lastUpdatedAt,
-      });
+
+    if (result.mode !== "supabase" || result.error || !result.data) {
+      setTvSyncStatus("warning");
+      setSessionActionError(result.error?.message ?? "No se pudo cerrar la jugada en Supabase.");
+      return;
     }
-    setSession(null);
-    setActiveBatch(null);
-    setCalledCards([]);
-    setWinner(null);
+
+    const remoteSession = realtimeSessionToSession(result.data);
+    const closedSession = closeSession(session.id, {
+      ...remoteSession,
+      status: remoteSession.status,
+      autoplayStatus: "finished",
+    }, { syncSupabase: false }) ?? remoteSession;
+    setSession(closedSession);
+    setActiveBatch(getBatchForSession(closedSession));
+    setCalledCards(hydrateSessionCards(closedSession.calledCards, closedSession.deckId));
+    setWinner(getWinnerFromSession(closedSession));
+    setSyncSource("Supabase");
+    setTvSyncStatus("sent");
   }
 
-  function cancelActiveSession() {
+  async function cancelActiveSession() {
     if (!session) {
       return;
     }
 
-    const cancelledSession = cancelSession(session.id);
-    if (cancelledSession) {
-      void closeRealtimeSession(cancelledSession.id, {
-        status: "cancelled",
-        calledCards: cancelledSession.calledCards,
-        playEndedAt: cancelledSession.playEndedAt,
-        durationSeconds: cancelledSession.durationSeconds,
-        lastUpdatedAt: cancelledSession.lastUpdatedAt,
-      });
+    setSessionActionError("");
+    setTvSyncStatus("syncing");
+    const endedAt = new Date().toISOString();
+    const durationSeconds = session.durationSeconds || getPlayElapsedSeconds(session);
+    const result = await closeRealtimeSession(session.id, {
+      status: "cancelled",
+      calledCards: session.calledCards,
+      autoplayStatus: "finished",
+      endedAt,
+      playEndedAt: session.playEndedAt ?? endedAt,
+      durationSeconds,
+    });
+    console.info("[HOSTER LIVE][GERENTE ACTIVA] cierre sesion", {
+      sessionId: session.id,
+      previousStatus: session.status,
+      nextStatus: "cancelled",
+      supabaseMode: result.mode,
+      supabaseError: result.error?.message ?? null,
+      supabaseStatus: result.data?.status ?? null,
+    });
+
+    if (result.mode !== "supabase" || result.error || !result.data) {
+      setTvSyncStatus("warning");
+      setSessionActionError(result.error?.message ?? "No se pudo cancelar la jugada en Supabase.");
+      return;
     }
-    setSession(null);
-    setActiveBatch(null);
-    setCalledCards([]);
-    setWinner(null);
+
+    const remoteSession = realtimeSessionToSession(result.data);
+    const cancelledSession = cancelSession(session.id, { syncSupabase: false }) ?? remoteSession;
+    setSession(cancelledSession);
+    setActiveBatch(getBatchForSession(cancelledSession));
+    setCalledCards(hydrateSessionCards(cancelledSession.calledCards, cancelledSession.deckId));
+    setWinner(getWinnerFromSession(cancelledSession));
+    setSyncSource("Supabase");
+    setTvSyncStatus("sent");
   }
 
   async function enableAudio() {
@@ -591,6 +650,11 @@ export default function JugadaActivaPage() {
             Crea una jugada para el restaurante del gerente y esta pantalla tomara el control
             operativo en vivo.
           </p>
+          {sessionActionError ? (
+            <p className="mx-auto mt-3 max-w-xl rounded-lg border border-chile/30 bg-chile/10 px-4 py-3 text-sm font-semibold text-[#ff9b91]">
+              {sessionActionError}
+            </p>
+          ) : null}
           <ButtonLink href="/gerente" className="mt-6">
             Ir al panel rapido
           </ButtonLink>
@@ -649,6 +713,11 @@ export default function JugadaActivaPage() {
   return (
     <Layout title="Jugada activa" eyebrow="HOSTER LIVE">
       <div className="mb-4 flex flex-wrap justify-end gap-2">
+        {sessionActionError ? (
+          <span className="rounded-lg border border-chile/30 bg-chile/10 px-3 py-2 text-xs font-bold text-[#ff9b91]">
+            {sessionActionError}
+          </span>
+        ) : null}
         <span
           className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${
             tvSyncStatus === "syncing"

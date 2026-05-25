@@ -16,6 +16,7 @@ import {
 import {
   getLatestRealtimeSessionByRestaurantId,
   realtimeSessionToSession,
+  subscribeToRestaurantSession,
 } from "@/lib/supabase/sessionRealtime";
 import {
   type WinMode,
@@ -44,6 +45,23 @@ function modeLabel(mode: WinMode) {
   return "Centro 4";
 }
 
+function getSessionTime(session?: Session | null) {
+  const time = session?.lastUpdatedAt ? new Date(session.lastUpdatedAt).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function chooseNewestSession(remoteSession: Session | null, localSession?: Session | null) {
+  if (!remoteSession) {
+    return localSession ?? null;
+  }
+
+  if (!localSession) {
+    return remoteSession;
+  }
+
+  return getSessionTime(remoteSession) >= getSessionTime(localSession) ? remoteSession : localSession;
+}
+
 export default function GerenteTablasPage() {
   const { currentUser } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
@@ -57,7 +75,9 @@ export default function GerenteTablasPage() {
   const [latestRemoteSession, setLatestRemoteSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    async function syncTablesState() {
+    let isMounted = true;
+
+    async function syncTablesState(remoteOverride?: Session | null) {
       const restaurantId = currentUser?.restaurantId;
       const refreshedRestaurants = await refreshRestaurantsFromSupabase();
       const restaurant = refreshedRestaurants.restaurants.find((item) => item.id === restaurantId);
@@ -67,12 +87,15 @@ export default function GerenteTablasPage() {
       const remoteResult = restaurantId
         ? await getLatestRealtimeSessionByRestaurantId(restaurantId)
         : null;
-      const remoteSession = remoteResult?.data ? realtimeSessionToSession(remoteResult.data) : null;
+      const remoteSession =
+        remoteOverride ?? (remoteResult?.data ? realtimeSessionToSession(remoteResult.data) : null);
       const activeSession = restaurantId ? getActiveSessionByRestaurantId(restaurantId) : undefined;
       const latestLocalSession = getSessions().find((item) =>
         restaurantId ? item.restaurantId === restaurantId : true,
       );
-      const nextSession = activeSession ?? remoteSession ?? latestLocalSession ?? null;
+      const localSession = activeSession ?? latestLocalSession ?? null;
+      const nextSession = chooseNewestSession(remoteSession, localSession);
+      const source = remoteSession && nextSession?.id === remoteSession.id ? "Supabase" : refreshedRestaurants.source;
       const defaultBatch =
         (nextSession?.batchId
           ? restaurantBatches.find((batch) => batch.id === nextSession.batchId)
@@ -85,11 +108,15 @@ export default function GerenteTablasPage() {
         restaurantBatches[0] ??
         null;
 
+      if (!isMounted) {
+        return;
+      }
+
       setBatches(restaurantBatches);
       setSession(nextSession);
       setLatestRemoteSession(remoteSession);
       setEnabledDecks((restaurant?.enabledDecks?.length ? restaurant.enabledDecks : ["loteria"]) as DeckId[]);
-      setDebugSource(remoteSession ? "Supabase" : refreshedRestaurants.source);
+      setDebugSource(source);
       console.info("[HOSTER LIVE][GERENTE TABLAS] debug", {
         user: currentUser?.email ?? currentUser?.name,
         restaurantId,
@@ -97,7 +124,10 @@ export default function GerenteTablasPage() {
         activeGames: restaurant?.activeGames,
         latestSessionId: nextSession?.id,
         latestSessionDeckId: nextSession?.deckId,
-        source: remoteSession ? "Supabase" : refreshedRestaurants.source,
+        updatedAt: nextSession?.lastUpdatedAt,
+        drawnCardsCount: nextSession?.calledCards.length ?? 0,
+        status: nextSession?.status,
+        source,
       });
       if (defaultBatch) {
         setSelectedGameId(defaultBatch.gameId);
@@ -115,10 +145,25 @@ export default function GerenteTablasPage() {
     const intervalId = globalThis.setInterval(() => void syncTablesState(), 2500);
     const handleStorage = () => void syncTablesState();
     window.addEventListener("storage", handleStorage);
+    const unsubscribe = currentUser?.restaurantId
+      ? subscribeToRestaurantSession(currentUser.restaurantId, (row) => {
+          const remoteSession = row ? realtimeSessionToSession(row) : null;
+          console.info("[HOSTER LIVE][GERENTE TABLAS] realtime event", {
+            sessionId: row?.id ?? "-",
+            status: row?.status ?? "-",
+            autoplayStatus: row?.autoplay_status ?? "-",
+            drawnCardsCount: row?.called_cards?.length ?? 0,
+            updatedAt: row?.last_updated_at ?? "-",
+          });
+          void syncTablesState(remoteSession);
+        })
+      : () => undefined;
 
     return () => {
+      isMounted = false;
       globalThis.clearInterval(intervalId);
       window.removeEventListener("storage", handleStorage);
+      unsubscribe();
     };
   }, [currentUser?.email, currentUser?.name, currentUser?.restaurantId]);
 
@@ -171,7 +216,12 @@ export default function GerenteTablasPage() {
 
     return toLoteriaBoards(activeBatch.boards).slice(0, session?.activeTables ?? activeBatch.quantity);
   }, [activeBatch, session?.activeTables]);
-  const sessionMatchesSelection = session?.batchId === activeBatch?.id && session?.deckId === activeBatch?.deckId;
+  const sessionMatchesSelection = Boolean(
+    session &&
+      activeBatch &&
+      session.deckId === activeBatch.deckId &&
+      (!session.batchId || session.batchId === activeBatch.id),
+  );
   const calledCardIds = sessionMatchesSelection ? session?.calledCards ?? [] : [];
   const lastCalledCardId = calledCardIds[calledCardIds.length - 1];
   const mode = sessionMatchesSelection ? session?.mode ?? "four_corners" : "four_corners";
@@ -316,6 +366,16 @@ export default function GerenteTablasPage() {
             <p className="text-bone/45">Debug sync</p>
             <p className="mt-1 font-semibold text-bone">
               {debugSource} · {latestRemoteSession?.id.slice(0, 8) ?? session?.id.slice(0, 8) ?? "sin sesion"}
+            </p>
+          </div>
+          <div>
+            <p className="text-bone/45">Updated at</p>
+            <p className="mt-1 font-semibold text-bone">{session?.lastUpdatedAt ?? "-"}</p>
+          </div>
+          <div>
+            <p className="text-bone/45">Status debug</p>
+            <p className="mt-1 font-semibold text-bone">
+              {session?.status ?? "-"} / {session?.autoplayStatus ?? "-"} / {session?.calledCards.length ?? 0}
             </p>
           </div>
         </div>
