@@ -208,6 +208,13 @@ function normalizeMoneyArray(values: unknown[]) {
   ).sort((left, right) => left - right);
 }
 
+function getAllowedPricesWithRequiredValues(
+  allowedPrices: unknown[],
+  ...requiredValues: unknown[]
+) {
+  return normalizeMoneyArray([...allowedPrices, ...requiredValues]);
+}
+
 function getBusinessTypeLabel(value: BusinessType) {
   return businessTypeOptions.find((option) => option.value === value)?.label ?? "Otro";
 }
@@ -242,6 +249,16 @@ function toggleModeValue(values: WinMode[], value: WinMode) {
 }
 
 function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
+  const defaultTablePrice = parseMoneyValue(
+    restaurant.defaultTablePrice ?? restaurant.allowedPrices[0] ?? 100,
+  );
+  const accumulatedTablePrice = parseMoneyValue(restaurant.accumulatedTablePrice);
+  const allowedPrices = getAllowedPricesWithRequiredValues(
+    restaurant.allowedPrices,
+    defaultTablePrice,
+    accumulatedTablePrice,
+  );
+
   return {
     name: restaurant.name,
     slug: restaurant.slug,
@@ -267,7 +284,7 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     accumulatedEnabled: restaurant.accumulatedEnabled,
     accumulatedAmountPerGame: String(restaurant.accumulatedAmountPerGame),
     accumulatedDay: restaurant.accumulatedDay,
-    accumulatedTablePrice: String(restaurant.accumulatedTablePrice),
+    accumulatedTablePrice: String(accumulatedTablePrice),
     accumulatedTableCount: String(restaurant.accumulatedTableCount),
     activeDeck: restaurant.activeDeck,
     primaryColor: restaurant.primaryColor,
@@ -293,10 +310,8 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     facebook: restaurant.facebook,
     tiktok: restaurant.tiktok,
     qrCampaignId: restaurant.qrCampaignId,
-    allowedPrices: restaurant.allowedPrices,
-    defaultTablePrice: String(
-      parseMoneyValue(restaurant.defaultTablePrice ?? restaurant.allowedPrices[0] ?? 100),
-    ),
+    allowedPrices,
+    defaultTablePrice: String(defaultTablePrice),
     allowedModes: restaurant.allowedModes,
     allowedTableCounts: restaurant.allowedTableCounts,
     enabledGames: restaurant.activeGames,
@@ -311,7 +326,19 @@ function validateForm(formState: RestaurantFormState) {
   const accumulatedAmountPerGame = parseMoneyValue(formState.accumulatedAmountPerGame);
   const accumulatedTablePrice = parseMoneyValue(formState.accumulatedTablePrice);
   const accumulatedTableCount = Number(formState.accumulatedTableCount);
-  const allowedPrices = normalizeMoneyArray(formState.allowedPrices);
+  const defaultTablePrice = parseMoneyValue(formState.defaultTablePrice);
+  const allowedPrices = getAllowedPricesWithRequiredValues(
+    formState.allowedPrices,
+    defaultTablePrice,
+    formState.accumulatedEnabled ? accumulatedTablePrice : undefined,
+  );
+
+  console.log("[HOSTER LIVE] validate restaurant prices", {
+    rawAllowedPrices: formState.allowedPrices,
+    normalizedAllowedPrices: allowedPrices,
+    rawDefaultTablePrice: formState.defaultTablePrice,
+    normalizedDefaultTablePrice: defaultTablePrice,
+  });
 
   if (!formState.name.trim()) {
     return "El nombre del restaurante es obligatorio.";
@@ -344,14 +371,12 @@ function validateForm(formState: RestaurantFormState) {
     return "Selecciona al menos un costo permitido.";
   }
 
-  const defaultTablePrice = parseMoneyValue(formState.defaultTablePrice);
-
-  if (!Number.isFinite(defaultTablePrice) || !allowedPrices.includes(defaultTablePrice)) {
-    return "El costo default debe estar dentro de los costos permitidos.";
+  if (!Number.isFinite(defaultTablePrice)) {
+    return "Selecciona un costo default valido.";
   }
-
-  if (formState.accumulatedEnabled && !allowedPrices.includes(accumulatedTablePrice)) {
-    return "El costo de tabla acumulado debe estar dentro de los costos permitidos.";
+  
+  if (formState.accumulatedEnabled && !Number.isFinite(accumulatedTablePrice)) {
+    return "Selecciona un costo de tabla acumulado valido.";
   }
 
   if (allowedPrices.some((price) => price % 50 !== 0)) {
@@ -533,10 +558,14 @@ export default function RestaurantesPage() {
     const normalizedActiveDeck = normalizedEnabledDecks.includes(formState.activeDeck)
       ? formState.activeDeck
       : normalizedEnabledDecks[0];
-    const normalizedAllowedPrices = normalizeMoneyArray(formState.allowedPrices);
     const normalizedDefaultTablePrice = parseMoneyValue(formState.defaultTablePrice);
     const normalizedAccumulatedAmountPerGame = parseMoneyValue(formState.accumulatedAmountPerGame);
     const normalizedAccumulatedTablePrice = parseMoneyValue(formState.accumulatedTablePrice);
+    const normalizedAllowedPrices = getAllowedPricesWithRequiredValues(
+      formState.allowedPrices,
+      normalizedDefaultTablePrice,
+      formState.accumulatedEnabled ? normalizedAccumulatedTablePrice : undefined,
+    );
 
     const payload = {
       name: formState.name.trim(),
@@ -1602,6 +1631,10 @@ export default function RestaurantesPage() {
                       setFormState((currentState) => ({
                         ...currentState,
                         accumulatedTablePrice: String(parseMoneyValue(event.target.value)),
+                        allowedPrices: getAllowedPricesWithRequiredValues(
+                          currentState.allowedPrices,
+                          event.target.value,
+                        ),
                       }))
                     }
                     className={inputClassName}
@@ -1733,7 +1766,11 @@ export default function RestaurantesPage() {
                   <p className="text-sm font-semibold text-bone">Costos permitidos</p>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {priceOptions.map((price) => {
-                      const selected = normalizeMoneyArray(formState.allowedPrices).includes(price);
+                      const selected = getAllowedPricesWithRequiredValues(
+                        formState.allowedPrices,
+                        formState.defaultTablePrice,
+                        formState.accumulatedEnabled ? formState.accumulatedTablePrice : undefined,
+                      ).includes(price);
 
                       return (
                         <button
@@ -1764,16 +1801,23 @@ export default function RestaurantesPage() {
                   <label className="mt-3 grid gap-2 sm:max-w-xs">
                     <span className="text-sm font-semibold text-bone">Costo default</span>
                     <select
-                    value={formState.defaultTablePrice}
-                    onChange={(event) =>
-                      setFormState((currentState) => ({
-                        ...currentState,
+                      value={formState.defaultTablePrice}
+                      onChange={(event) =>
+                        setFormState((currentState) => ({
+                          ...currentState,
                           defaultTablePrice: String(parseMoneyValue(event.target.value)),
-                      }))
-                    }
+                          allowedPrices: getAllowedPricesWithRequiredValues(
+                            currentState.allowedPrices,
+                            event.target.value,
+                          ),
+                        }))
+                      }
                       className={inputClassName}
                     >
-                      {formState.allowedPrices.map((price) => (
+                      {getAllowedPricesWithRequiredValues(
+                        formState.allowedPrices,
+                        formState.defaultTablePrice,
+                      ).map((price) => (
                         <option key={price} value={price}>
                           {formatCurrency(price)}
                         </option>
