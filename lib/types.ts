@@ -45,6 +45,7 @@ export type RestaurantConfig = {
   commissionRestaurantPercent: number;
   allowedTableCounts: number[];
   allowedPrices: number[];
+  defaultTablePrice: number;
   allowedModes: WinMode[];
   enabledGames: string[];
   activeGames: GameId[];
@@ -82,6 +83,7 @@ export type QrCampaign = {
   id: string;
   name: string;
   active: boolean;
+  channel: "printed_qr" | "tv_standby" | "general";
   title: string;
   message: string;
   ctaLabel: string;

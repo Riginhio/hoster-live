@@ -37,7 +37,7 @@ function asMode(value: unknown) {
 export function createDefaultDemoConfig(restaurantId = defaultRestaurantId): DemoGameConfig {
   const restaurant = getRestaurantById(restaurantId);
   const activeTables = restaurant.allowedTableCounts[restaurant.allowedTableCounts.length - 1];
-  const tablePrice = restaurant.allowedPrices[0];
+  const tablePrice = restaurant.defaultTablePrice ?? restaurant.allowedPrices[0];
   const commissionPercent = restaurant.restaurantCommissionPercent;
 
   return {
@@ -69,10 +69,7 @@ export function normalizeDemoConfig(
     asNumber(value.activeTables) ??
     asNumber(value.activeBoards) ??
     restaurant.allowedTableCounts[restaurant.allowedTableCounts.length - 1];
-  const tablePrice =
-    asNumber(value.tablePrice) ??
-    asNumber(value.pricePerBoard) ??
-    restaurant.allowedPrices[0];
+  const tablePrice = restaurant.defaultTablePrice ?? restaurant.allowedPrices[0];
   const commissionPercent =
     asNumber(value.commissionPercent) ??
     restaurant.restaurantCommissionPercent;
@@ -90,7 +87,7 @@ export function normalizeDemoConfig(
     : restaurant.allowedTableCounts[restaurant.allowedTableCounts.length - 1];
   const safeTablePrice = restaurant.allowedPrices.includes(tablePrice)
     ? tablePrice
-    : restaurant.allowedPrices[0];
+    : restaurant.defaultTablePrice ?? restaurant.allowedPrices[0];
   const safeMode = restaurant.allowedModes.includes(mode) ? mode : restaurant.allowedModes[0];
 
   return {

@@ -13,6 +13,7 @@ import {
   updateQrCampaign,
 } from "@/lib/qr/qrCampaignStorage";
 import type { QrCampaign, RestaurantConfig } from "@/lib/types";
+import { readImageFileAsDataUrl } from "@/lib/browserFiles";
 
 const inputClassName =
   "h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none transition placeholder:text-bone/30 focus:border-mezcal/70";
@@ -37,6 +38,7 @@ function nextMonth() {
 function emptyForm(restaurants: RestaurantConfig[]): FormState {
   return {
     name: "Campana QR",
+    channel: "printed_qr",
     title: "Promocion especial para tu mesa",
     message: "Presenta esta pantalla con tu mesero y conserva tu tabla hasta terminar la jugada.",
     ctaLabel: "Ver promocion",
@@ -63,6 +65,12 @@ function campaignToForm(campaign: QrCampaign): FormState {
 function statusClassName(active: boolean) {
   return active ? "bg-agave/16 text-agave ring-agave/35" : "bg-bone/8 text-bone/52 ring-bone/10";
 }
+
+const channelLabels: Record<QrCampaign["channel"], string> = {
+  printed_qr: "QR impreso en tablas",
+  tv_standby: "Pantalla TV / standby",
+  general: "Promocion general",
+};
 
 export default function MasterQrCampaignsPage() {
   const [restaurants, setRestaurants] = useState<RestaurantConfig[]>([]);
@@ -103,6 +111,18 @@ export default function MasterQrCampaignsPage() {
     setError(null);
   }
 
+  async function handleImageFile(
+    file: File | undefined,
+    key: "sponsorLogoUrl" | "bannerImageUrl",
+  ) {
+    if (!file) {
+      return;
+    }
+
+    const dataUrl = await readImageFileAsDataUrl(file);
+    setField(key, dataUrl);
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -120,6 +140,7 @@ export default function MasterQrCampaignsPage() {
       name: formState.name.trim(),
       title: formState.title.trim(),
       message: formState.message.trim(),
+      channel: formState.channel,
       ctaLabel: formState.ctaLabel.trim(),
       ctaUrl: formState.ctaUrl.trim(),
       sponsorName: formState.sponsorName.trim(),
@@ -187,18 +208,29 @@ export default function MasterQrCampaignsPage() {
               className={textareaClassName}
               placeholder="Mensaje"
             />
+            <select
+              value={formState.channel}
+              onChange={(event) =>
+                setField("channel", event.target.value as QrCampaign["channel"])
+              }
+              className={inputClassName}
+            >
+              <option value="printed_qr">QR impreso en tablas</option>
+              <option value="tv_standby">Pantalla TV / standby</option>
+              <option value="general">Promocion general</option>
+            </select>
             <div className="grid grid-cols-2 gap-3">
               <input
                 value={formState.ctaLabel}
                 onChange={(event) => setField("ctaLabel", event.target.value)}
                 className={inputClassName}
-                placeholder="CTA"
+                placeholder="Texto del boton"
               />
               <input
                 value={formState.ctaUrl}
                 onChange={(event) => setField("ctaUrl", event.target.value)}
                 className={inputClassName}
-                placeholder="URL CTA"
+                placeholder="Enlace destino del boton"
               />
             </div>
             <input
@@ -214,10 +246,26 @@ export default function MasterQrCampaignsPage() {
               placeholder="Sponsor logo URL"
             />
             <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) =>
+                void handleImageFile(event.target.files?.[0], "sponsorLogoUrl")
+              }
+              className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
+            />
+            <input
               value={formState.bannerImageUrl}
               onChange={(event) => setField("bannerImageUrl", event.target.value)}
               className={inputClassName}
               placeholder="Banner image URL"
+            />
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) =>
+                void handleImageFile(event.target.files?.[0], "bannerImageUrl")
+              }
+              className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
             />
             <div className="grid grid-cols-2 gap-3">
               <input
@@ -259,6 +307,34 @@ export default function MasterQrCampaignsPage() {
               </div>
             ) : null}
             {error ? <p className="text-sm font-semibold text-[#ff9b91]">{error}</p> : null}
+            <div className="overflow-hidden rounded-lg border border-mezcal/25 bg-mezcal/12">
+              {formState.bannerImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={formState.bannerImageUrl} alt="" className="h-32 w-full object-cover" />
+              ) : (
+                <div className="h-32 bg-mezcal/20" />
+              )}
+              <div className="p-4">
+                <div className="flex items-center gap-3">
+                  {formState.sponsorLogoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={formState.sponsorLogoUrl}
+                      alt=""
+                      className="h-10 w-10 rounded-lg bg-bone object-contain p-1"
+                    />
+                  ) : null}
+                  <p className="text-xs font-black uppercase tracking-[0.2em] text-mezcal">
+                    {formState.sponsorName || "Sponsor"}
+                  </p>
+                </div>
+                <p className="mt-3 font-display text-3xl text-bone">{formState.title}</p>
+                <p className="mt-2 text-sm leading-6 text-bone/65">{formState.message}</p>
+                <p className="mt-4 inline-flex rounded-lg bg-mezcal px-3 py-2 text-sm font-black text-obsidian">
+                  {formState.ctaLabel || "Ver promocion"}
+                </p>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button type="submit">
                 <Save size={18} />
@@ -289,6 +365,9 @@ export default function MasterQrCampaignsPage() {
                     {campaign.active ? "activa" : "inactiva"}
                   </span>
                   <span className="rounded-full bg-mezcal/12 px-3 py-1 text-xs font-bold uppercase text-mezcal ring-1 ring-mezcal/24">
+                    {channelLabels[campaign.channel]}
+                  </span>
+                  <span className="rounded-full bg-bone/8 px-3 py-1 text-xs font-bold uppercase text-bone/55 ring-1 ring-bone/10">
                     {campaign.appliesToRestaurantIds === "all"
                       ? "Todos"
                       : `${campaign.appliesToRestaurantIds.length} restaurantes`}

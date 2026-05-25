@@ -17,10 +17,11 @@ import {
 } from "@/lib/loteria";
 import { generateBoardsPdf } from "@/lib/pdf/generateBoardsPdf";
 import {
-  getActiveBoardBatch,
+  getBoardBatches,
   toLoteriaBoards,
   type BoardBatch,
 } from "@/lib/boards/boardBatchStorage";
+import { decks, type DeckId, type GameId } from "@/lib/decks";
 
 function modeLabel(mode: WinMode) {
   if (mode === "four_corners") {
@@ -41,20 +42,46 @@ function modeLabel(mode: WinMode) {
 export default function GerenteTablasPage() {
   const { currentUser } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
-  const [activeBatch, setActiveBatch] = useState<BoardBatch | null>(null);
+  const [batches, setBatches] = useState<BoardBatch[]>([]);
+  const [selectedGameId, setSelectedGameId] = useState<GameId>("loteria");
+  const [selectedDeckId, setSelectedDeckId] = useState<DeckId>("loteria");
+  const [selectedBatchId, setSelectedBatchId] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     function syncTablesState() {
       const restaurantId = currentUser?.restaurantId;
-      const batch = restaurantId ? getActiveBoardBatch(restaurantId) : undefined;
+      const restaurantBatches = getBoardBatches().filter((batch) =>
+        restaurantId ? batch.restaurantId === restaurantId : true,
+      );
       const activeSession = restaurantId ? getActiveSessionByRestaurantId(restaurantId) : undefined;
       const latestSession = getSessions().find((item) =>
         restaurantId ? item.restaurantId === restaurantId : true,
       );
+      const nextSession = activeSession ?? latestSession ?? null;
+      const defaultBatch =
+        (nextSession?.batchId
+          ? restaurantBatches.find((batch) => batch.id === nextSession.batchId)
+          : undefined) ??
+        restaurantBatches.find(
+          (batch) =>
+            batch.status === "active" &&
+            (!nextSession || batch.deckId === nextSession.deckId),
+        ) ??
+        restaurantBatches[0] ??
+        null;
 
-      setActiveBatch(batch ?? null);
-      setSession(activeSession ?? latestSession ?? null);
+      setBatches(restaurantBatches);
+      setSession(nextSession);
+      if (defaultBatch) {
+        setSelectedGameId(defaultBatch.gameId);
+        setSelectedDeckId(defaultBatch.deckId);
+        setSelectedBatchId((currentId) =>
+          !activeSession && currentId && restaurantBatches.some((batch) => batch.id === currentId)
+            ? currentId
+            : defaultBatch.id,
+        );
+      }
     }
 
     syncTablesState();
@@ -68,6 +95,47 @@ export default function GerenteTablasPage() {
     };
   }, [currentUser?.restaurantId]);
 
+  const availableDecks = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          batches
+            .filter((batch) => batch.gameId === selectedGameId)
+            .map((batch) => batch.deckId),
+        ),
+      ) as DeckId[],
+    [batches, selectedGameId],
+  );
+
+  const availableBatches = useMemo(
+    () =>
+      batches.filter(
+        (batch) => batch.gameId === selectedGameId && batch.deckId === selectedDeckId,
+      ),
+    [batches, selectedDeckId, selectedGameId],
+  );
+
+  const activeBatch = useMemo(
+    () =>
+      availableBatches.find((batch) => batch.id === selectedBatchId) ??
+      availableBatches.find((batch) => batch.status === "active") ??
+      availableBatches[0] ??
+      null,
+    [availableBatches, selectedBatchId],
+  );
+
+  useEffect(() => {
+    if (!availableDecks.includes(selectedDeckId) && availableDecks[0]) {
+      setSelectedDeckId(availableDecks[0]);
+    }
+  }, [availableDecks, selectedDeckId]);
+
+  useEffect(() => {
+    if (activeBatch && selectedBatchId !== activeBatch.id) {
+      setSelectedBatchId(activeBatch.id);
+    }
+  }, [activeBatch, selectedBatchId]);
+
   const boards = useMemo(() => {
     if (!activeBatch) {
       return [];
@@ -75,13 +143,14 @@ export default function GerenteTablasPage() {
 
     return toLoteriaBoards(activeBatch.boards).slice(0, session?.activeTables ?? activeBatch.quantity);
   }, [activeBatch, session?.activeTables]);
-  const calledCardIds = session?.calledCards ?? [];
+  const sessionMatchesSelection = session?.batchId === activeBatch?.id && session?.deckId === activeBatch?.deckId;
+  const calledCardIds = sessionMatchesSelection ? session?.calledCards ?? [] : [];
   const lastCalledCardId = calledCardIds[calledCardIds.length - 1];
-  const mode = session?.mode ?? "four_corners";
-  const winnerFolio = session?.winnerFolio;
+  const mode = sessionMatchesSelection ? session?.mode ?? "four_corners" : "four_corners";
+  const winnerFolio = sessionMatchesSelection ? session?.winnerFolio : undefined;
   const restaurantName = session?.restaurantName ?? currentUser?.restaurantName ?? "Rancho Viejo";
-  const tablePrice = session?.tablePrice ?? 100;
-  const prizeAmount = session?.prizeAmount ?? 9600;
+  const tablePrice = sessionMatchesSelection ? session?.tablePrice ?? 100 : 0;
+  const prizeAmount = sessionMatchesSelection ? session?.prizeAmount ?? 0 : 0;
   const averageProgress = boards.length
     ? Math.round(
       boards.reduce((total, board) => {
@@ -148,7 +217,47 @@ export default function GerenteTablasPage() {
       </div>
 
       <Card className="mb-5 bg-bone/[0.035]">
-        <div className="grid gap-3 text-sm md:grid-cols-4">
+        <div className="mb-5 grid gap-3 md:grid-cols-3">
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-bone/70">Juego</span>
+            <select
+              value={selectedGameId}
+              onChange={(event) => setSelectedGameId(event.target.value as GameId)}
+              className="h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
+            >
+              <option value="loteria">Loteria</option>
+            </select>
+          </label>
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-bone/70">Deck</span>
+            <select
+              value={selectedDeckId}
+              onChange={(event) => setSelectedDeckId(event.target.value as DeckId)}
+              className="h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
+            >
+              {availableDecks.map((deckId) => (
+                <option key={deckId} value={deckId}>
+                  {decks[deckId].label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-bone/70">Lote</span>
+            <select
+              value={activeBatch?.id ?? ""}
+              onChange={(event) => setSelectedBatchId(event.target.value)}
+              className="h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
+            >
+              {availableBatches.map((batch) => (
+                <option key={batch.id} value={batch.id}>
+                  {batch.name} / {batch.status}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid gap-3 text-sm md:grid-cols-5">
           <div>
             <p className="text-bone/45">Restaurante</p>
             <p className="mt-1 font-semibold text-bone">{restaurantName}</p>
@@ -164,6 +273,12 @@ export default function GerenteTablasPage() {
           <div>
             <p className="text-bone/45">Ganadora</p>
             <p className="mt-1 font-semibold text-mezcal">{winnerFolio ?? "Pendiente"}</p>
+          </div>
+          <div>
+            <p className="text-bone/45">Deck activo</p>
+            <p className="mt-1 font-semibold text-bone">
+              {activeBatch ? decks[activeBatch.deckId].label : "No disponible"}
+            </p>
           </div>
           <div>
             <p className="text-bone/45">Lote activo</p>

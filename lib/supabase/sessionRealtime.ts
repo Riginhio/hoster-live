@@ -44,7 +44,7 @@ export type RealtimeGameSession = {
   active_promotions: Session["activePromotions"];
   operator_user_id: string | null;
   operator_username: string | null;
-  operator_role: "manager" | "play" | null;
+  operator_role: "manager" | "play" | "supervisor" | null;
   duration_seconds: number;
   last_updated_at: string;
   created_at: string;
@@ -73,7 +73,7 @@ type RealtimeResult<T> = {
   mode: "local" | "supabase";
 };
 
-type RealtimeSessionUpdate = Partial<
+export type RealtimeSessionUpdate = Partial<
   Pick<
     Session,
     | "status"
@@ -264,7 +264,7 @@ export async function createRealtimeSession(session: Session): Promise<RealtimeR
   await supabase
     .from("game_sessions")
     .update({
-      status: "finalized",
+      status: "closed_without_winner",
       autoplay_status: "finished",
       play_ended_at: new Date().toISOString(),
       last_updated_at: new Date().toISOString(),
@@ -474,7 +474,7 @@ export async function closeRealtimeSession(
 
   return updateRealtimeSession(sessionId, {
     ...updates,
-    status: "finalized",
+    status: updates.status ?? "completed",
     autoplayStatus: "finished",
     playEndedAt: updates.playEndedAt ?? now,
     lastUpdatedAt: now,

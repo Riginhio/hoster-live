@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleDollarSign, Trophy } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
@@ -39,8 +40,16 @@ function statusLabel(status: string) {
     return "Activo";
   }
 
-  if (status === "finalized") {
-    return "Finalizado";
+  if (status === "completed") {
+    return "Completado";
+  }
+
+  if (status === "cancelled") {
+    return "Cancelado";
+  }
+
+  if (status === "closed_without_winner") {
+    return "Sin ganador";
   }
 
   if (status === "paused") {
@@ -55,8 +64,12 @@ function statusClassName(status: string) {
     return "bg-agave/16 text-agave ring-agave/35";
   }
 
-  if (status === "finalized") {
+  if (status === "completed") {
     return "bg-mezcal/14 text-mezcal ring-mezcal/28";
+  }
+
+  if (status === "cancelled") {
+    return "bg-chile/10 text-[#ff9b91] ring-chile/25";
   }
 
   if (status === "paused") {
@@ -169,7 +182,7 @@ export default function MasterDashboardPage() {
               games: 0,
               grossRevenue: 0,
               profit: 0,
-              status: "finalized",
+              status: "completed",
             };
             const profit = getSessionHlFixedFee(session);
 
@@ -235,27 +248,28 @@ export default function MasterDashboardPage() {
               Finanzas y operacion live
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-bone/62">
-              Vista mock local para medir ingresos, utilidad, premios y desempeno por venue antes
-              de conectar backend real.
+              {sessions.length === 0
+                ? "Sin sesiones reales todavia. Las metricas visibles usan datos demo marcados como referencia."
+                : "Metricas calculadas desde sesiones reales persistentes en este entorno."}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-agave/20 bg-agave/10 px-4 py-3">
+            <Link href="/master/jugadas" className="rounded-lg border border-agave/20 bg-agave/10 px-4 py-3 transition hover:bg-agave/16">
               <Activity className="mx-auto h-5 w-5 text-agave" />
               <p className="mt-2 text-xs font-bold uppercase tracking-[0.16em] text-agave">Live</p>
-            </div>
-            <div className="rounded-lg border border-mezcal/20 bg-mezcal/10 px-4 py-3">
+            </Link>
+            <Link href="/master/cortes" className="rounded-lg border border-mezcal/20 bg-mezcal/10 px-4 py-3 transition hover:bg-mezcal/16">
               <CircleDollarSign className="mx-auto h-5 w-5 text-mezcal" />
               <p className="mt-2 text-xs font-bold uppercase tracking-[0.16em] text-mezcal">
                 Yield
               </p>
-            </div>
-            <div className="rounded-lg border border-bone/10 bg-bone/[0.045] px-4 py-3">
+            </Link>
+            <Link href="/master/cortes" className="rounded-lg border border-bone/10 bg-bone/[0.045] px-4 py-3 transition hover:bg-bone/10">
               <Trophy className="mx-auto h-5 w-5 text-bone/70" />
               <p className="mt-2 text-xs font-bold uppercase tracking-[0.16em] text-bone/55">
                 Prize
               </p>
-            </div>
+            </Link>
           </div>
         </div>
       </div>
@@ -385,7 +399,9 @@ export default function MasterDashboardPage() {
             </p>
             <h3 className="mt-1 font-display text-2xl text-bone">Ultimas jugadas</h3>
           </div>
-          <p className="text-sm text-bone/45">Mock local estructurado</p>
+          <p className="text-sm text-bone/45">
+            {sessions.length === 0 ? "Demo local estructurado" : "Sesiones reales persistentes"}
+          </p>
         </div>
         <div className="mt-5 grid gap-3 lg:grid-cols-5">
           {recentGameActivity.map((activity, index) => (

@@ -9,7 +9,9 @@ export type MockUser = {
   name: string;
   restaurantId?: string;
   restaurantName?: string;
-  venueRole?: "manager" | "play";
+  venueRole?: "manager" | "play" | "supervisor";
+  restaurantIds?: string[];
+  brandName?: string;
   userId?: string;
 };
 
@@ -50,6 +52,8 @@ export function toAuthUser(user: MockUser): AuthUser {
     restaurantId: user.restaurantId ? normalizeRestaurantSlug(user.restaurantId) : undefined,
     restaurantName: user.restaurantName,
     venueRole: user.venueRole,
+    restaurantIds: user.restaurantIds,
+    brandName: user.brandName,
     userId: user.userId,
   };
 }

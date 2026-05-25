@@ -70,7 +70,7 @@ export function ValidateClient({ payload }: ValidateClientProps) {
     setBoardExists(validation.boardExists);
     setIsValid(validation.isValid);
     setCampaigns(
-      decodedPayload ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId) : [],
+      decodedPayload ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId, "printed_qr") : [],
     );
     setRestaurant(decodedPayload ? getRestaurantById(decodedPayload.restaurantId) ?? null : null);
   }, [decodedPayload]);

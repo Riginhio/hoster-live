@@ -24,7 +24,9 @@ export default function MasterUsuariosPage() {
     password: "Hoster123",
     name: "Gerente",
     restaurantId: "rancho-viejo",
-    role: "manager" as "manager" | "play",
+    restaurantIds: ["rancho-viejo"],
+    brandName: "",
+    role: "manager" as "manager" | "play" | "supervisor",
     active: true,
   });
 
@@ -45,6 +47,9 @@ export default function MasterUsuariosPage() {
       password: formState.password,
       name: formState.name,
       restaurantId: formState.restaurantId,
+      restaurantIds:
+        formState.role === "supervisor" ? formState.restaurantIds : [formState.restaurantId],
+      brandName: formState.brandName,
       id: formState.id || undefined,
       role: formState.role,
       active: existingUser?.active ?? formState.active,
@@ -71,6 +76,8 @@ export default function MasterUsuariosPage() {
       password: "Hoster123",
       name: "Gerente",
       restaurantId: restaurants[0]?.id ?? "rancho-viejo",
+      restaurantIds: restaurants[0]?.id ? [restaurants[0].id] : ["rancho-viejo"],
+      brandName: "",
       role: "manager",
       active: true,
     });
@@ -98,12 +105,21 @@ export default function MasterUsuariosPage() {
             />
             <select
               value={formState.role}
-              onChange={(event) => setFormState((current) => ({ ...current, role: event.target.value as "manager" | "play" }))}
+              onChange={(event) => setFormState((current) => ({ ...current, role: event.target.value as "manager" | "play" | "supervisor" }))}
               className="h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
             >
               <option value="manager">Manager</option>
               <option value="play">Play</option>
+              <option value="supervisor">Supervisor / Grupo</option>
             </select>
+            {formState.role === "supervisor" ? (
+              <input
+                value={formState.brandName}
+                onChange={(event) => setFormState((current) => ({ ...current, brandName: event.target.value }))}
+                className="h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
+                placeholder="Marca / grupo (ej. La Greta)"
+              />
+            ) : null}
             <input
               value={formState.username}
               onChange={(event) => setFormState((current) => ({ ...current, username: event.target.value }))}
@@ -127,6 +143,30 @@ export default function MasterUsuariosPage() {
                 </option>
               ))}
             </select>
+            {formState.role === "supervisor" ? (
+              <div className="grid gap-2 rounded-lg border border-bone/10 bg-obsidian/38 p-3">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/42">
+                  Sucursales visibles
+                </p>
+                {restaurants.map((restaurant) => (
+                  <label key={restaurant.id} className="flex items-center gap-2 text-sm font-semibold text-bone/72">
+                    <input
+                      type="checkbox"
+                      checked={formState.restaurantIds.includes(restaurant.id)}
+                      onChange={() =>
+                        setFormState((current) => ({
+                          ...current,
+                          restaurantIds: current.restaurantIds.includes(restaurant.id)
+                            ? current.restaurantIds.filter((id) => id !== restaurant.id)
+                            : [...current.restaurantIds, restaurant.id],
+                        }))
+                      }
+                    />
+                    {restaurant.name}
+                  </label>
+                ))}
+              </div>
+            ) : null}
             <Button type="submit" className="w-full">
               <Plus size={16} />
               {formState.id ? "Actualizar usuario" : "Guardar usuario"}
@@ -156,6 +196,11 @@ export default function MasterUsuariosPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mezcal">
                       {restaurant?.name ?? user.restaurantId} · {user.role}
                     </p>
+                    {user.role === "supervisor" ? (
+                      <p className="mt-1 text-xs font-semibold text-bone/45">
+                        {user.brandName || "Grupo sin nombre"} / {user.restaurantIds.length} sucursales
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -167,6 +212,8 @@ export default function MasterUsuariosPage() {
                           password: user.password,
                           name: user.name,
                           restaurantId: user.restaurantId,
+                          restaurantIds: user.restaurantIds,
+                          brandName: user.brandName,
                           role: user.role,
                           active: user.active,
                         })

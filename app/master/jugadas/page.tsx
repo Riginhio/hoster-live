@@ -40,7 +40,10 @@ function formatDate(value: string) {
 }
 
 function statusLabel(status: SessionStatus) {
-  return status === "active" ? "Activa" : "Finalizada";
+  if (status === "active") return "Activa";
+  if (status === "completed") return "Completada";
+  if (status === "cancelled") return "Cancelada";
+  return "Cerrada sin ganador";
 }
 
 function statusClassName(status: SessionStatus) {
@@ -48,7 +51,9 @@ function statusClassName(status: SessionStatus) {
     return "bg-agave/16 text-agave ring-agave/35";
   }
 
-  return "bg-mezcal/14 text-mezcal ring-mezcal/28";
+  if (status === "completed") return "bg-mezcal/14 text-mezcal ring-mezcal/28";
+  if (status === "cancelled") return "bg-chile/10 text-[#ff9b91] ring-chile/25";
+  return "bg-bone/8 text-bone/52 ring-bone/10";
 }
 
 export default function MasterJugadasPage() {
@@ -89,7 +94,7 @@ export default function MasterJugadasPage() {
   }, [modeFilter, restaurantFilter, searchTerm, sessions, statusFilter]);
 
   const kpis = useMemo(() => {
-    const finalizedSessions = filteredSessions.filter((session) => session.status === "finalized");
+    const finalizedSessions = filteredSessions.filter((session) => session.status === "completed");
 
     return [
       {
@@ -209,7 +214,9 @@ export default function MasterJugadasPage() {
           >
             <option value="all">Todos</option>
             <option value="active">Activas</option>
-            <option value="finalized">Finalizadas</option>
+            <option value="completed">Completadas</option>
+            <option value="cancelled">Canceladas</option>
+            <option value="closed_without_winner">Cerradas sin ganador</option>
           </select>
         </div>
       </Card>

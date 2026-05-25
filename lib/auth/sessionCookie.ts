@@ -4,7 +4,15 @@ export const authCookieName = "hoster-live-auth";
 
 export type AuthCookiePayload = Pick<
   AuthUser,
-  "email" | "role" | "name" | "restaurantId" | "restaurantName" | "venueRole" | "userId"
+  | "email"
+  | "role"
+  | "name"
+  | "restaurantId"
+  | "restaurantName"
+  | "venueRole"
+  | "restaurantIds"
+  | "brandName"
+  | "userId"
 >;
 
 function safeEncode(value: string) {
@@ -57,4 +65,3 @@ export function clearAuthCookie() {
 
   document.cookie = `${authCookieName}=; path=/; max-age=0; samesite=lax`;
 }
-

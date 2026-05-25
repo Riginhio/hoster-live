@@ -1,9 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
+  Ban,
   CircleDollarSign,
   Clock3,
   Megaphone,
@@ -26,6 +27,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { checkWinner, type LoteriaBoard, type LoteriaCard, type WinMode } from "@/lib/loteria";
 import {
+  cancelSession,
   closeSession,
   getActiveSession,
   getSessionById,
@@ -35,7 +37,7 @@ import {
   type Session,
 } from "@/lib/sessions/sessionStorage";
 import {
-  getActiveBoardBatch,
+  getActiveBoardBatchByDeck,
   getBoardBatches,
   toLoteriaBoards,
   type BoardBatch,
@@ -50,8 +52,11 @@ import { getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
   closeRealtimeSession,
   createRealtimeSession,
+  type RealtimeSessionUpdate,
   updateRealtimeSession,
 } from "@/lib/supabase/sessionRealtime";
+import { preloadDeckImages, resetDeckPreloadCache } from "@/lib/decks/preloadImages";
+import { decks } from "@/lib/decks";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -115,7 +120,7 @@ function getBatchForSession(session: Session) {
     return getBoardBatches().find((batch) => batch.id === session.batchId) ?? null;
   }
 
-  return getActiveBoardBatch(session.restaurantId) ?? null;
+  return getActiveBoardBatchByDeck(session.restaurantId, session.deckId) ?? null;
 }
 
 function getWinnerFromSession(session: Session | null): WinnerState | null {
@@ -129,26 +134,37 @@ function getWinnerFromSession(session: Session | null): WinnerState | null {
   };
 }
 
-function syncRealtimeFromSession(session: Session) {
-  void updateRealtimeSession(session.id, {
-    status: session.status,
-    autoplayStatus: session.autoplayStatus,
-    autoplayIntervalSeconds: session.autoplayIntervalSeconds,
-    preStartCountdownSeconds: session.preStartCountdownSeconds,
-    preStartStartedAt: session.preStartStartedAt,
-    autoplayStartedAt: session.autoplayStartedAt,
-    calledCards: session.calledCards,
-    winnerFolio: session.winnerFolio,
-    winnerCards: session.winnerCards,
-    playStartedAt: session.playStartedAt,
-    playEndedAt: session.playEndedAt,
-    durationSeconds: session.durationSeconds,
-    activePromotions: session.activePromotions,
+function syncRealtimeFromSession(
+  session: Session,
+  updates: RealtimeSessionUpdate,
+  timingLabel?: string,
+) {
+  if (timingLabel) {
+    console.time(`${timingLabel} escritura Supabase`);
+  }
+
+  return updateRealtimeSession(session.id, {
+    ...updates,
     lastUpdatedAt: session.lastUpdatedAt,
   }).then((result) => {
+    if (timingLabel) {
+      console.timeEnd(`${timingLabel} escritura Supabase`);
+      console.time(`${timingLabel} emision realtime`);
+      console.timeEnd(`${timingLabel} emision realtime`);
+    }
+
     if (result.mode === "supabase" && (result.error || !result.data)) {
+      console.warn("[HOSTER LIVE] Fallo sync realtime; reintentando insert completo.", result.error);
       void createRealtimeSession(session);
     }
+
+    return result;
+  }).catch((error) => {
+    if (timingLabel) {
+      console.timeEnd(`${timingLabel} escritura Supabase`);
+    }
+    console.warn("[HOSTER LIVE] No se pudo sincronizar TV.", error);
+    return null;
   });
 }
 
@@ -163,6 +179,9 @@ export default function JugadaActivaPage() {
   const [countdownRemaining, setCountdownRemaining] = useState(0);
   const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [tvSyncStatus, setTvSyncStatus] = useState<"idle" | "syncing" | "sent" | "warning" | "reconnecting">("idle");
+  const [lastImageTimingCardId, setLastImageTimingCardId] = useState("");
+  const previousDeckIdRef = useRef<string | undefined>(undefined);
   const supabaseStatus = getSupabaseConfigStatus();
 
   const restaurantId = currentUser?.restaurantId;
@@ -175,14 +194,61 @@ export default function JugadaActivaPage() {
     return toLoteriaBoards(activeBatch.boards).slice(0, session.activeTables);
   }, [activeBatch, session]);
 
-  const deck = useMemo(() => (session ? getSessionDeck(session.id, session.deckId) : []), [session]);
+  const deck = session ? getSessionDeck(session.id, session.deckId) : [];
   const deckSize = deck.length || 54;
   const currentCard = calledCards[calledCards.length - 1] ?? null;
   const nextCard = session ? deck[session.calledCards.length] ?? null : null;
   const progressPercent = Math.round((calledCards.length / deckSize) * 100);
-  const statusLabel = session?.status === "active" ? "activa" : "finalizada";
+  const statusLabel = session?.status === "active" ? "activa" : session?.status ?? "cerrada";
   const autoplayStatus = session?.autoplayStatus ?? "idle";
   const activePromotions = session?.activePromotions ?? [];
+  const tvSyncLabel =
+    tvSyncStatus === "syncing"
+      ? "Sincronizando TV..."
+      : tvSyncStatus === "sent"
+        ? "Carta enviada"
+        : tvSyncStatus === "warning"
+          ? "TV pendiente"
+          : supabaseStatus.connected
+            ? "Realtime listo"
+            : "Reconectando realtime";
+
+  useEffect(() => {
+    if (!session?.deckId) {
+      return;
+    }
+
+    if (previousDeckIdRef.current && previousDeckIdRef.current !== session.deckId) {
+      setCalledCards([]);
+      setWinner(null);
+      setLastImageTimingCardId("");
+      resetDeckPreloadCache(previousDeckIdRef.current);
+    }
+
+    previousDeckIdRef.current = session.deckId;
+
+    void preloadDeckImages(session.deckId, "gerente");
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    setIntervalMs((session.autoplayIntervalSeconds ?? 5) * 1000);
+  }, [session]);
+
+  useEffect(() => {
+    if (!currentCard) {
+      return;
+    }
+
+    const timingLabel = `[HL timing] gerente render final ${currentCard.id}`;
+    console.time(timingLabel);
+    requestAnimationFrame(() => {
+      console.timeEnd(timingLabel);
+    });
+  }, [currentCard]);
 
   const syncActiveSession = useCallback(() => {
     if (!restaurantId) {
@@ -237,9 +303,18 @@ export default function JugadaActivaPage() {
   }, [session]);
 
   const advanceSession = useCallback((sessionId: string) => {
+    const clickTimingLabel = `[HL timing] cantar carta ${Date.now()}`;
+    console.time(`${clickTimingLabel} click cantar carta`);
     const latestSession = getSessionById(sessionId);
 
     if (!latestSession || latestSession.status !== "active" || latestSession.winnerFolio) {
+      console.timeEnd(`${clickTimingLabel} click cantar carta`);
+      return;
+    }
+
+    console.time(`${clickTimingLabel} calculo local`);
+    if (latestSession.autoplayStatus !== "playing") {
+      console.timeEnd(`${clickTimingLabel} click cantar carta`);
       return;
     }
 
@@ -251,6 +326,8 @@ export default function JugadaActivaPage() {
       : [];
 
     if (!nextSessionCard) {
+      console.timeEnd(`${clickTimingLabel} calculo local`);
+      console.timeEnd(`${clickTimingLabel} click cantar carta`);
       return;
     }
 
@@ -270,14 +347,37 @@ export default function JugadaActivaPage() {
       updates.winnerCards = winningBoard.result.winningCards.map((card) => card.id);
       updates.autoplayStatus = "finished";
     }
+    console.timeEnd(`${clickTimingLabel} calculo local`);
 
-    const updatedSession = updateSession(latestSession.id, updates) ?? latestSession;
-    syncRealtimeFromSession(updatedSession);
+    console.time(`${clickTimingLabel} actualizacion local state`);
+    const updatedSession =
+      updateSession(latestSession.id, updates, { syncSupabase: false }) ?? latestSession;
+    const nextHydratedCards = hydrateSessionCards(updatedSession.calledCards, updatedSession.deckId);
+
     setSession(updatedSession);
     setActiveBatch(sessionBatch);
-    setCalledCards(hydrateSessionCards(updatedSession.calledCards, updatedSession.deckId));
+    setCalledCards(nextHydratedCards);
     setWinner(getWinnerFromSession(updatedSession));
+    setTvSyncStatus("syncing");
+    console.timeEnd(`${clickTimingLabel} actualizacion local state`);
     playGameTone(winningBoard ? "winner" : "card", audioEnabled);
+    console.timeEnd(`${clickTimingLabel} click cantar carta`);
+
+    void syncRealtimeFromSession(
+      updatedSession,
+      {
+        calledCards: updatedSession.calledCards,
+        winnerFolio: updatedSession.winnerFolio,
+        winnerCards: updatedSession.winnerCards,
+        autoplayStatus: updatedSession.autoplayStatus,
+        playStartedAt: updatedSession.playStartedAt,
+        playEndedAt: updatedSession.playEndedAt,
+        durationSeconds: updatedSession.durationSeconds,
+      },
+      clickTimingLabel,
+    ).then((result) => {
+      setTvSyncStatus(result && !result.error ? "sent" : "warning");
+    });
 
   }, [audioEnabled]);
 
@@ -298,9 +398,13 @@ export default function JugadaActivaPage() {
       const updatedSession = updateSession(session.id, {
         autoplayStatus: "playing",
         autoplayStartedAt: new Date().toISOString(),
-      });
+      }, { syncSupabase: false });
       if (updatedSession) {
-        syncRealtimeFromSession(updatedSession);
+        void syncRealtimeFromSession(updatedSession, {
+          autoplayStatus: updatedSession.autoplayStatus,
+          autoplayStartedAt: updatedSession.autoplayStartedAt,
+          playStartedAt: updatedSession.playStartedAt,
+        });
       }
       syncActiveSession();
     }
@@ -331,12 +435,34 @@ export default function JugadaActivaPage() {
     });
     if (closedSession) {
       void closeRealtimeSession(closedSession.id, {
+        status: closedSession.status,
         calledCards: closedSession.calledCards,
         winnerFolio: closedSession.winnerFolio,
         winnerCards: closedSession.winnerCards,
         playEndedAt: closedSession.playEndedAt,
         durationSeconds: closedSession.durationSeconds,
         lastUpdatedAt: closedSession.lastUpdatedAt,
+      });
+    }
+    setSession(null);
+    setActiveBatch(null);
+    setCalledCards([]);
+    setWinner(null);
+  }
+
+  function cancelActiveSession() {
+    if (!session) {
+      return;
+    }
+
+    const cancelledSession = cancelSession(session.id);
+    if (cancelledSession) {
+      void closeRealtimeSession(cancelledSession.id, {
+        status: "cancelled",
+        calledCards: cancelledSession.calledCards,
+        playEndedAt: cancelledSession.playEndedAt,
+        durationSeconds: cancelledSession.durationSeconds,
+        lastUpdatedAt: cancelledSession.lastUpdatedAt,
       });
     }
     setSession(null);
@@ -365,9 +491,14 @@ export default function JugadaActivaPage() {
       preStartCountdownSeconds: countdownSeconds,
       preStartStartedAt: new Date().toISOString(),
       autoplayStartedAt: undefined,
-    });
+    }, { syncSupabase: false });
     if (updatedSession) {
-      syncRealtimeFromSession(updatedSession);
+      void syncRealtimeFromSession(updatedSession, {
+        autoplayStatus: updatedSession.autoplayStatus,
+        preStartCountdownSeconds: updatedSession.preStartCountdownSeconds,
+        preStartStartedAt: updatedSession.preStartStartedAt,
+        autoplayStartedAt: updatedSession.autoplayStartedAt,
+      });
     }
     syncActiveSession();
   }
@@ -381,9 +512,14 @@ export default function JugadaActivaPage() {
       autoplayStatus: "playing",
       autoplayIntervalSeconds: intervalMs / 1000,
       autoplayStartedAt: new Date().toISOString(),
-    });
+    }, { syncSupabase: false });
     if (updatedSession) {
-      syncRealtimeFromSession(updatedSession);
+      void syncRealtimeFromSession(updatedSession, {
+        autoplayStatus: updatedSession.autoplayStatus,
+        autoplayIntervalSeconds: updatedSession.autoplayIntervalSeconds,
+        autoplayStartedAt: updatedSession.autoplayStartedAt,
+        playStartedAt: updatedSession.playStartedAt,
+      });
     }
     syncActiveSession();
   }
@@ -395,9 +531,11 @@ export default function JugadaActivaPage() {
 
     const updatedSession = updateSession(session.id, {
       autoplayStatus: "paused",
-    });
+    }, { syncSupabase: false });
     if (updatedSession) {
-      syncRealtimeFromSession(updatedSession);
+      void syncRealtimeFromSession(updatedSession, {
+        autoplayStatus: updatedSession.autoplayStatus,
+      });
     }
     syncActiveSession();
   }
@@ -410,9 +548,12 @@ export default function JugadaActivaPage() {
     const updatedSession = updateSession(session.id, {
       autoplayStatus: "playing",
       autoplayStartedAt: session.autoplayStartedAt ?? new Date().toISOString(),
-    });
+    }, { syncSupabase: false });
     if (updatedSession) {
-      syncRealtimeFromSession(updatedSession);
+      void syncRealtimeFromSession(updatedSession, {
+        autoplayStatus: updatedSession.autoplayStatus,
+        autoplayStartedAt: updatedSession.autoplayStartedAt,
+      });
     }
     syncActiveSession();
   }
@@ -439,7 +580,20 @@ export default function JugadaActivaPage() {
 
   return (
     <Layout title="Jugada activa" eyebrow="HOSTER LIVE">
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex flex-wrap justify-end gap-2">
+        <span
+          className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${
+            tvSyncStatus === "syncing"
+              ? "border-mezcal/30 bg-mezcal/10 text-mezcal"
+              : tvSyncStatus === "sent"
+                ? "border-agave/30 bg-agave/10 text-agave"
+                : tvSyncStatus === "warning"
+                  ? "border-chile/30 bg-chile/10 text-[#ff9b91]"
+                  : "border-bone/10 bg-bone/[0.04] text-bone/55"
+          }`}
+        >
+          {tvSyncLabel}
+        </span>
         <span
           className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${
             supabaseStatus.connected
@@ -476,10 +630,13 @@ export default function JugadaActivaPage() {
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <InfoTile label="Session ID" value={session.id.slice(0, 12)} />
-            <InfoTile label="Lote activo" value={activeBatch?.name ?? "Sin lote"} />
+            <InfoTile label="Juego" value="Loteria" />
+            <InfoTile label="Deck" value={decks[session.deckId]?.label ?? session.deckId} />
+            <InfoTile label="Lote" value={activeBatch?.name ?? "Sin lote"} />
             <InfoTile label="Modalidad" value={modeLabels[session.mode]} />
             <InfoTile label="Tablas en juego" value={String(session.activeTables)} />
             <InfoTile label="Costo tabla" value={formatCurrency(session.tablePrice)} />
+            <InfoTile label="Operador" value={session.operatorUsername ?? session.operatorRole ?? "Sin operador"} />
             <InfoTile label="Premio" value={formatCurrency(session.prizeAmount)} />
             <InfoTile label="Cartas cantadas" value={`${calledCards.length}/${deckSize}`} />
             <InfoTile label="Estado" value={autoplayStatus} />
@@ -626,7 +783,7 @@ export default function JugadaActivaPage() {
             )}
             <Button
               onClick={callNextCard}
-              disabled={!nextCard || Boolean(winner) || autoplayStatus === "countdown"}
+              disabled={!nextCard || Boolean(winner) || autoplayStatus !== "playing"}
             >
               <SkipForward size={18} />
               Cantar siguiente carta
@@ -655,9 +812,13 @@ export default function JugadaActivaPage() {
               <Play size={18} />
               Reanudar
             </Button>
+            <Button variant="secondary" onClick={cancelActiveSession}>
+              <Ban size={18} />
+              Cancelar jugada
+            </Button>
             <Button variant="danger" onClick={closeActiveSession}>
               <Power size={18} />
-              Finalizar jugada
+              {winner ? "Finalizar jugada" : "Cerrar sin ganador"}
             </Button>
           </div>
 
@@ -667,21 +828,27 @@ export default function JugadaActivaPage() {
                 key={option}
                 type="button"
                 onClick={() => {
+                  if (autoplayStatus !== "idle") {
+                    return;
+                  }
                   setIntervalMs(option);
                   if (session) {
                     const updatedSession = updateSession(session.id, {
                       autoplayIntervalSeconds: option / 1000,
-                    });
+                    }, { syncSupabase: false });
                     if (updatedSession) {
-                      syncRealtimeFromSession(updatedSession);
+                      void syncRealtimeFromSession(updatedSession, {
+                        autoplayIntervalSeconds: updatedSession.autoplayIntervalSeconds,
+                      });
                     }
                     syncActiveSession();
                   }
                 }}
+                disabled={autoplayStatus !== "idle"}
                 className={`h-9 rounded-lg border px-4 text-xs font-black transition ${
                   intervalMs === option
                     ? "border-agave bg-agave text-obsidian"
-                    : "border-bone/10 bg-bone/[0.04] text-bone/70 hover:bg-bone/10"
+                    : "border-bone/10 bg-bone/[0.04] text-bone/70 hover:bg-bone/10 disabled:cursor-not-allowed disabled:opacity-45"
                 }`}
               >
                 {option / 1000}s
@@ -702,6 +869,16 @@ export default function JugadaActivaPage() {
                   height={1141}
                   className="h-full w-full object-contain"
                   priority
+                  onLoad={() => {
+                    if (lastImageTimingCardId === currentCard.id) {
+                      return;
+                    }
+
+                    setLastImageTimingCardId(currentCard.id);
+                    const timingLabel = `[HL timing] gerente carga imagen ${currentCard.id}`;
+                    console.time(timingLabel);
+                    console.timeEnd(timingLabel);
+                  }}
                 />
               ) : (
                 <div className="grid h-full place-items-center bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-6 text-obsidian">

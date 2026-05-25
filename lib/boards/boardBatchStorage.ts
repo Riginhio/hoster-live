@@ -2,7 +2,7 @@ import {
   type LoteriaBoard,
   type LoteriaCard,
 } from "@/lib/loteria";
-import { getDeckCards, normalizeDeckId, type DeckId } from "@/lib/decks";
+import { getDeckCards, normalizeDeckId, type DeckId, type GameId } from "@/lib/decks";
 import { encodeBoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
@@ -23,6 +23,7 @@ export type Board = {
 export type BoardBatch = {
   id: string;
   restaurantId: string;
+  gameId: GameId;
   deckId: DeckId;
   restaurantName: string;
   name: string;
@@ -114,6 +115,7 @@ function createDefaultBatch(
   return {
     id,
     restaurantId: slug,
+    gameId: "loteria",
     deckId,
     restaurantName,
     name,
@@ -146,6 +148,7 @@ function normalizeBatch(batch: BoardBatch): BoardBatch {
   return {
     ...batch,
     restaurantId,
+    gameId: batch.gameId ?? "loteria",
     deckId,
     restaurantName: restaurant?.name ?? batch.restaurantName,
     boards: hasCompatibleBoards
@@ -211,10 +214,22 @@ export function getActiveBoardBatch(restaurantId: string) {
   );
 }
 
+export function getActiveBoardBatchByDeck(restaurantId: string, deckId: DeckId) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
+  return getBoardBatches().find(
+    (batch) =>
+      batch.restaurantId === slug &&
+      batch.deckId === deckId &&
+      batch.status === "active",
+  );
+}
+
 export function createBoardBatch(input: {
   restaurantId: string;
   restaurantName: string;
   name: string;
+  gameId?: GameId;
+  deckId?: DeckId;
   quantity: number;
   validFrom: string;
   validTo: string;
@@ -223,10 +238,11 @@ export function createBoardBatch(input: {
   const id = createId("batch");
   const restaurant = getRestaurantById(input.restaurantId) ?? getRestaurantById(input.restaurantName);
   const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(input.restaurantId);
-  const deckId = normalizeDeckId(restaurant?.activeDeck);
+  const deckId = normalizeDeckId(input.deckId ?? restaurant?.activeDeck);
   const batch: BoardBatch = {
     id,
     restaurantId,
+    gameId: input.gameId ?? "loteria",
     deckId,
     restaurantName: restaurant?.name ?? input.restaurantName,
     name: input.name,
@@ -241,7 +257,9 @@ export function createBoardBatch(input: {
   const nextBatches =
     batch.status === "active"
       ? currentBatches.map((currentBatch) =>
-          currentBatch.restaurantId === batch.restaurantId && currentBatch.status === "active"
+          currentBatch.restaurantId === batch.restaurantId &&
+          currentBatch.deckId === batch.deckId &&
+          currentBatch.status === "active"
             ? { ...currentBatch, status: "inactive" as const }
             : currentBatch,
         )
@@ -264,7 +282,11 @@ export function activateBoardBatch(batchId: string) {
       return { ...batch, status: "active" as const };
     }
 
-    if (batch.restaurantId === selectedBatch.restaurantId && batch.status === "active") {
+    if (
+      batch.restaurantId === selectedBatch.restaurantId &&
+      batch.deckId === selectedBatch.deckId &&
+      batch.status === "active"
+    ) {
       return { ...batch, status: "inactive" as const };
     }
 

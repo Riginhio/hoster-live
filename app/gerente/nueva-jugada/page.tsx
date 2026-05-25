@@ -19,11 +19,15 @@ import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
 import type { RestaurantConfig } from "@/lib/types";
 import { calculateFinancialBreakdown } from "@/lib/finance";
 import { createSession } from "@/lib/sessions/sessionStorage";
-import { saveLastGameConfig } from "@/lib/sessions/lastGameConfigStorage";
-import { getActiveBoardBatch } from "@/lib/boards/boardBatchStorage";
+import {
+  saveLastGameConfig,
+  saveLastGameConfigByType,
+} from "@/lib/sessions/lastGameConfigStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
 import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { DeckId } from "@/lib/decks";
+import { getActiveBoardBatchByDeck } from "@/lib/boards/boardBatchStorage";
+import { preloadDeckImages } from "@/lib/decks/preloadImages";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -31,8 +35,6 @@ const modeLabels: Record<WinMode, string> = {
   center_four: "4 centrales",
   full_card: "Llena",
 };
-const specialTableOptions = [60, 80, 100];
-const specialPriceOptions = [300, 500, 1000];
 const specialModeOptions: WinMode[] = ["four_corners", "center_four", "x_shape", "full_card"];
 
 export default function NuevaJugadaPage() {
@@ -51,8 +53,8 @@ export default function NuevaJugadaPage() {
     [config.restaurantId, restaurants],
   );
   const selectedActiveBatch = useMemo(
-    () => getActiveBoardBatch(selectedRestaurant.id) ?? null,
-    [selectedRestaurant.id],
+    () => getActiveBoardBatchByDeck(selectedRestaurant.id, selectedDeckId) ?? null,
+    [selectedDeckId, selectedRestaurant.id],
   );
 
   useEffect(() => {
@@ -91,11 +93,11 @@ export default function NuevaJugadaPage() {
   const calculatedPrize = financialBreakdown.prizeAmount;
   const availableSpecialTables = useMemo(
     () =>
-      specialTableOptions.filter((option) => selectedRestaurant.allowedTableCounts.includes(option)),
+      selectedRestaurant.allowedTableCounts,
     [selectedRestaurant.allowedTableCounts],
   );
   const availableSpecialPrices = useMemo(
-    () => specialPriceOptions.filter((price) => selectedRestaurant.allowedPrices.includes(price)),
+    () => selectedRestaurant.allowedPrices,
     [selectedRestaurant.allowedPrices],
   );
   const availableSpecialModes = useMemo(
@@ -112,10 +114,12 @@ export default function NuevaJugadaPage() {
   useEffect(() => {
     const nextActiveTables = availableSpecialTables.includes(config.activeTables)
       ? config.activeTables
-      : availableSpecialTables[0] ?? specialTableOptions[0];
+      : availableSpecialTables[0] ?? 50;
     const nextTablePrice = availableSpecialPrices.includes(config.tablePrice)
       ? config.tablePrice
-      : availableSpecialPrices[0] ?? specialPriceOptions[0];
+      : selectedRestaurant.allowedPrices.includes(selectedRestaurant.defaultTablePrice)
+        ? selectedRestaurant.defaultTablePrice
+        : availableSpecialPrices[0] ?? 100;
     const nextMode = availableSpecialModes.includes(config.mode)
       ? config.mode
       : availableSpecialModes[0] ?? specialModeOptions[0];
@@ -151,11 +155,11 @@ export default function NuevaJugadaPage() {
 
       if (nextRestaurantId !== currentConfig.restaurantId) {
         const nextActiveTables =
-          specialTableOptions.find((option) => restaurant.allowedTableCounts.includes(option)) ??
-          specialTableOptions[0];
+          restaurant.allowedTableCounts[0] ?? 50;
         const nextTablePrice =
-          specialPriceOptions.find((price) => restaurant.allowedPrices.includes(price)) ??
-          specialPriceOptions[0];
+          restaurant.allowedPrices.includes(restaurant.defaultTablePrice)
+            ? restaurant.defaultTablePrice
+            : restaurant.allowedPrices[0] ?? 100;
         const nextMode =
           specialModeOptions.find((mode) => restaurant.allowedModes.includes(mode)) ??
           specialModeOptions[0];
@@ -269,15 +273,22 @@ export default function NuevaJugadaPage() {
         grossRevenue: financialBreakdown.grossRevenue,
         prizeAmount: financialBreakdown.prizeAmount,
         autoplayStatus: "idle",
-        autoplayIntervalSeconds: 5,
+        autoplayIntervalSeconds: Math.max(3, Math.round(selectedRestaurant.autoplayInterval / 1000)),
         preStartCountdownSeconds: 60,
-        activePromotions: getActiveQrCampaignsForRestaurant(selectedRestaurant.id),
+        activePromotions: getActiveQrCampaignsForRestaurant(selectedRestaurant.id, "general"),
         operatorUserId: currentUser?.userId,
         operatorUsername: currentUser?.email ?? currentUser?.name,
         operatorRole: currentUser?.venueRole ?? "manager",
       });
       void createRealtimeSession(createdSession);
+      void preloadDeckImages(selectedDeckId, "especial-start");
       saveLastGameConfig(selectedRestaurant.id, {
+        activeTables: nextConfig.activeTables,
+        tablePrice: nextConfig.tablePrice,
+        mode: nextConfig.mode,
+        createdAt: nextConfig.createdAt ?? new Date().toISOString(),
+      });
+      saveLastGameConfigByType(selectedRestaurant.id, "special", {
         activeTables: nextConfig.activeTables,
         tablePrice: nextConfig.tablePrice,
         mode: nextConfig.mode,
@@ -424,7 +435,7 @@ export default function NuevaJugadaPage() {
             </div>
 
             <fieldset>
-              <legend className="mb-2 block text-sm font-semibold text-bone/70">Modalidad</legend>
+              <legend className="mb-2 block text-sm font-semibold text-bone/70">Modalidad de juego</legend>
               <div className="grid gap-3 md:grid-cols-3">
                 {availableSpecialModes.map((option) => (
                   <button

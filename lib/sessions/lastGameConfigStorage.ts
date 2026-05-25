@@ -7,6 +7,7 @@ export type LastGameConfig = {
   tablePrice: number;
   mode: WinMode;
   createdAt: string;
+  gameType?: "normal_30" | "normal_50" | "special";
 };
 
 type LastGameConfigByRestaurant = Record<string, LastGameConfig>;
@@ -49,6 +50,10 @@ function normalizeConfig(value: unknown): LastGameConfig | null {
     tablePrice: value.tablePrice,
     mode: value.mode,
     createdAt: value.createdAt,
+    gameType:
+      value.gameType === "normal_30" || value.gameType === "normal_50" || value.gameType === "special"
+        ? value.gameType
+        : undefined,
   };
 }
 
@@ -75,8 +80,9 @@ function getLastGameConfigs(): LastGameConfigByRestaurant {
         const normalizedConfig = normalizeConfig(config);
 
         if (normalizedConfig) {
-          const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
-          configs[slug] = normalizedConfig;
+          const [rawRestaurantId, gameType] = restaurantId.split(":");
+          const slug = getRestaurantById(rawRestaurantId)?.id ?? normalizeRestaurantSlug(rawRestaurantId);
+          configs[gameType ? `${slug}:${gameType}` : slug] = normalizedConfig;
         }
 
         return configs;
@@ -93,6 +99,14 @@ export function getLastGameConfig(restaurantId: string) {
   return getLastGameConfigs()[slug] ?? null;
 }
 
+export function getLastGameConfigByType(
+  restaurantId: string,
+  gameType: NonNullable<LastGameConfig["gameType"]>,
+) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
+  return getLastGameConfigs()[`${slug}:${gameType}`] ?? null;
+}
+
 export function saveLastGameConfig(restaurantId: string, config: LastGameConfig) {
   const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   const configs = {
@@ -105,4 +119,23 @@ export function saveLastGameConfig(restaurantId: string, config: LastGameConfig)
   }
 
   return config;
+}
+
+export function saveLastGameConfigByType(
+  restaurantId: string,
+  gameType: NonNullable<LastGameConfig["gameType"]>,
+  config: LastGameConfig,
+) {
+  const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
+  const nextConfig = { ...config, gameType };
+  const configs = {
+    ...getLastGameConfigs(),
+    [`${slug}:${gameType}`]: nextConfig,
+  };
+
+  if (hasLocalStorage()) {
+    window.localStorage.setItem(lastGameConfigStorageKey, JSON.stringify(configs));
+  }
+
+  return nextConfig;
 }

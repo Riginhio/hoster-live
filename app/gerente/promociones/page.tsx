@@ -14,7 +14,7 @@ export default function GerentePromocionesPage() {
 
   useEffect(() => {
     if (currentUser?.restaurantId) {
-      setCampaigns(getActiveQrCampaignsForRestaurant(currentUser.restaurantId));
+      setCampaigns(getActiveQrCampaignsForRestaurant(currentUser.restaurantId, "general"));
     }
   }, [currentUser?.restaurantId]);
 

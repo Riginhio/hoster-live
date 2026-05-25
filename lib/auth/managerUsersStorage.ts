@@ -10,7 +10,9 @@ export type ManagerUser = {
   password: string;
   name: string;
   restaurantId: string;
-  role: "manager" | "play";
+  restaurantIds: string[];
+  brandName: string;
+  role: "manager" | "play" | "supervisor";
   active: boolean;
   createdAt: string;
 };
@@ -34,7 +36,11 @@ function normalizeUser(user: Partial<ManagerUser>): ManagerUser {
     password: user.password ?? "Hoster123",
     name: user.name ?? "Gerente",
     restaurantId: normalizeRestaurantSlug(user.restaurantId, "rancho-viejo"),
-    role: user.role === "play" ? "play" : "manager",
+    restaurantIds: user.restaurantIds?.length
+      ? user.restaurantIds.map((restaurantId) => normalizeRestaurantSlug(restaurantId))
+      : [normalizeRestaurantSlug(user.restaurantId, "rancho-viejo")],
+    brandName: user.brandName ?? "",
+    role: user.role === "play" || user.role === "supervisor" ? user.role : "manager",
     active: user.active ?? true,
     createdAt: user.createdAt ?? new Date().toISOString(),
   };

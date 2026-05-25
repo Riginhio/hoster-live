@@ -67,6 +67,8 @@ function parseStoredUser(rawValue: string | null) {
             role: "gerente" as const,
             name: managerUser.name,
             restaurantId: managerUser.restaurantId,
+            restaurantIds: managerUser.restaurantIds,
+            brandName: managerUser.brandName,
             venueRole: managerUser.role,
             userId: managerUser.id,
           }
@@ -122,6 +124,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: "gerente",
         name: managerUser.name,
         restaurantId: managerUser.restaurantId,
+        restaurantIds: managerUser.restaurantIds,
+        brandName: managerUser.brandName,
         venueRole: managerUser.role,
         userId: managerUser.id,
       };

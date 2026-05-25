@@ -8,6 +8,7 @@ const defaultCampaign: QrCampaign = {
   id: "campaign-hoster-live-default",
   name: "Experiencia Hoster Live",
   active: true,
+  channel: "printed_qr",
   title: "Tu tabla oficial esta registrada",
   message:
     "Disfruta la experiencia Hoster Live. Conserva tu tabla hasta terminar la jugada.",
@@ -54,6 +55,10 @@ function normalizeCampaign(campaign: Partial<QrCampaign>): QrCampaign {
     id: campaign.id ?? createId(),
     name: campaign.name ?? "Campana QR",
     active: campaign.active ?? true,
+    channel:
+      campaign.channel === "tv_standby" || campaign.channel === "general"
+        ? campaign.channel
+        : "printed_qr",
     title: campaign.title ?? defaultCampaign.title,
     message: campaign.message ?? defaultCampaign.message,
     ctaLabel: campaign.ctaLabel ?? "",
@@ -107,11 +112,17 @@ function saveQrCampaigns(campaigns: QrCampaign[]) {
   return campaigns;
 }
 
-export function getActiveQrCampaignForRestaurant(restaurantId: string) {
-  return getActiveQrCampaignsForRestaurant(restaurantId)[0];
+export function getActiveQrCampaignForRestaurant(
+  restaurantId: string,
+  channel?: QrCampaign["channel"],
+) {
+  return getActiveQrCampaignsForRestaurant(restaurantId, channel)[0];
 }
 
-export function getActiveQrCampaignsForRestaurant(restaurantId: string) {
+export function getActiveQrCampaignsForRestaurant(
+  restaurantId: string,
+  channel?: QrCampaign["channel"],
+) {
   const slug = getRestaurantById(restaurantId)?.id ?? normalizeRestaurantSlug(restaurantId);
   const campaigns = getQrCampaigns();
   const restaurant = getRestaurantById(slug);
@@ -119,13 +130,18 @@ export function getActiveQrCampaignsForRestaurant(restaurantId: string) {
     (campaign) =>
       campaign.active && appliesToRestaurant(campaign, slug) && isNowWithinRange(campaign),
   );
+  const channelCampaigns = channel
+    ? applicableCampaigns.filter(
+        (campaign) => campaign.channel === channel || campaign.channel === "general",
+      )
+    : applicableCampaigns;
   const configuredCampaign = restaurant?.qrCampaignId
-    ? applicableCampaigns.find((campaign) => campaign.id === restaurant.qrCampaignId)
+    ? channelCampaigns.find((campaign) => campaign.id === restaurant.qrCampaignId)
     : undefined;
-  const specificCampaigns = applicableCampaigns.filter(
+  const specificCampaigns = channelCampaigns.filter(
     (campaign) => campaign.appliesToRestaurantIds !== "all",
   );
-  const globalCampaigns = applicableCampaigns.filter(
+  const globalCampaigns = channelCampaigns.filter(
     (campaign) => campaign.appliesToRestaurantIds === "all",
   );
   const orderedCampaigns = [

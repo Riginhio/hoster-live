@@ -39,6 +39,7 @@ export const demoRestaurant: RestaurantConfig = {
   commissionRestaurantPercent: 20,
   allowedTableCounts: [20, 30, 50],
   allowedPrices: [50, 100, 150, 200, 300],
+  defaultTablePrice: 100,
   allowedModes: ["four_corners", "x_shape", "center_four", "full_card"],
   enabledGames: ["loteria"],
   activeGames: ["loteria"],
@@ -106,6 +107,7 @@ export const doroteoRestaurant: RestaurantConfig = {
   commissionRestaurantPercent: 25,
   allowedTableCounts: [20, 30, 50],
   allowedPrices: [100, 150, 200, 300],
+  defaultTablePrice: 150,
   allowedModes: ["four_corners", "x_shape", "full_card"],
   enabledGames: ["loteria"],
   activeGames: ["loteria"],
@@ -252,6 +254,10 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
       ? value.allowedTableCounts
       : fallback.allowedTableCounts,
     allowedPrices: value.allowedPrices?.length ? value.allowedPrices : fallback.allowedPrices,
+    defaultTablePrice: normalizeNumber(
+      value.defaultTablePrice,
+      value.allowedPrices?.[0] ?? fallback.defaultTablePrice,
+    ),
     allowedModes: value.allowedModes?.length ? value.allowedModes : fallback.allowedModes,
     enabledGames: value.enabledGames?.length ? value.enabledGames : fallback.enabledGames,
     activeGames: normalizeGameIds(value.activeGames ?? value.enabledGames, fallback.activeGames),

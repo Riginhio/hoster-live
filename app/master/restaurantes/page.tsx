@@ -6,6 +6,7 @@ import { clsx } from "clsx";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { readImageFileAsDataUrl } from "@/lib/browserFiles";
 import type { WinMode } from "@/lib/loteria";
 import type { DeckId, GameId } from "@/lib/decks";
 import type { BusinessType, RestaurantConfig } from "@/lib/types";
@@ -64,6 +65,7 @@ type RestaurantFormState = {
   tiktok: string;
   qrCampaignId: string;
   allowedPrices: number[];
+  defaultTablePrice: string;
   allowedModes: WinMode[];
   allowedTableCounts: number[];
   enabledGames: GameId[];
@@ -156,6 +158,7 @@ const emptyForm: RestaurantFormState = {
   tiktok: "",
   qrCampaignId: "",
   allowedPrices: [50, 100, 150, 200, 300],
+  defaultTablePrice: "100",
   allowedModes: ["four_corners"],
   allowedTableCounts: [20, 30, 50],
   enabledGames: ["loteria"],
@@ -249,6 +252,7 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     tiktok: restaurant.tiktok,
     qrCampaignId: restaurant.qrCampaignId,
     allowedPrices: restaurant.allowedPrices,
+    defaultTablePrice: String(restaurant.defaultTablePrice ?? restaurant.allowedPrices[0] ?? 100),
     allowedModes: restaurant.allowedModes,
     allowedTableCounts: restaurant.allowedTableCounts,
     enabledGames: restaurant.activeGames,
@@ -283,6 +287,12 @@ function validateForm(formState: RestaurantFormState) {
 
   if (formState.allowedPrices.length === 0) {
     return "Selecciona al menos un costo permitido.";
+  }
+
+  const defaultTablePrice = Number(formState.defaultTablePrice);
+
+  if (!Number.isFinite(defaultTablePrice) || !formState.allowedPrices.includes(defaultTablePrice)) {
+    return "El costo default debe estar dentro de los costos permitidos.";
   }
 
   if (formState.allowedPrices.some((price) => price % 50 !== 0)) {
@@ -361,10 +371,18 @@ export default function RestaurantesPage() {
     }
 
     const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeForm();
+      }
+    };
+
     document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isFormOpen]);
 
@@ -508,6 +526,7 @@ export default function RestaurantesPage() {
       tiktok: formState.tiktok.trim(),
       qrCampaignId: formState.qrCampaignId.trim(),
       allowedPrices: formState.allowedPrices,
+      defaultTablePrice: Number(formState.defaultTablePrice),
       allowedModes: formState.allowedModes,
       allowedTableCounts: formState.allowedTableCounts,
       enabledGames: normalizedActiveGames,
@@ -532,6 +551,18 @@ export default function RestaurantesPage() {
   function handleToggleRestaurant(restaurantId: string) {
     toggleRestaurant(restaurantId);
     refreshRestaurants();
+  }
+
+  async function handleImageFile(
+    file: File | undefined,
+    key: "logoUrl" | "promoImageUrl" | "standbyImageUrl",
+  ) {
+    if (!file) {
+      return;
+    }
+
+    const dataUrl = await readImageFileAsDataUrl(file);
+    setFormState((currentState) => ({ ...currentState, [key]: dataUrl }));
   }
 
   return (
@@ -874,21 +905,7 @@ export default function RestaurantesPage() {
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-
-                          if (!file) {
-                            return;
-                          }
-
-                          const reader = new FileReader();
-                          reader.onload = () =>
-                            setFormState((currentState) => ({
-                              ...currentState,
-                              logoUrl: String(reader.result ?? ""),
-                            }));
-                          reader.readAsDataURL(file);
-                        }}
+                        onChange={(event) => void handleImageFile(event.target.files?.[0], "logoUrl")}
                         className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
                       />
                     </div>
@@ -1224,17 +1241,28 @@ export default function RestaurantesPage() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field label="Imagen promo URL">
-                  <input
-                    value={formState.promoImageUrl}
-                    onChange={(event) =>
-                      setFormState((currentState) => ({
-                        ...currentState,
-                        promoImageUrl: event.target.value,
-                      }))
-                    }
-                    className={inputClassName}
-                  />
+                <Field label="Imagen promocional por URL o archivo">
+                  <div className="grid gap-2">
+                    <input
+                      value={formState.promoImageUrl}
+                      onChange={(event) =>
+                        setFormState((currentState) => ({
+                          ...currentState,
+                          promoImageUrl: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                      placeholder="https://.../promo.png"
+                    />
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(event) =>
+                        void handleImageFile(event.target.files?.[0], "promoImageUrl")
+                      }
+                      className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
+                    />
+                  </div>
                 </Field>
                 <Field label="Subtitulo promo" className="md:col-span-2">
                   <textarea
@@ -1248,7 +1276,7 @@ export default function RestaurantesPage() {
                     className={textareaClassName}
                   />
                 </Field>
-                <Field label="QR campaign ID">
+                <Field label="Campana QR">
                   <input
                     value={formState.qrCampaignId}
                     onChange={(event) =>
@@ -1288,17 +1316,28 @@ export default function RestaurantesPage() {
                     placeholder="HOSTER LIVE"
                   />
                 </Field>
-                <Field label="Imagen/banner URL">
-                  <input
-                    value={formState.standbyImageUrl}
-                    onChange={(event) =>
-                      setFormState((currentState) => ({
-                        ...currentState,
-                        standbyImageUrl: event.target.value,
-                      }))
-                    }
-                    className={inputClassName}
-                  />
+                <Field label="Imagen standby por URL o archivo">
+                  <div className="grid gap-2">
+                    <input
+                      value={formState.standbyImageUrl}
+                      onChange={(event) =>
+                        setFormState((currentState) => ({
+                          ...currentState,
+                          standbyImageUrl: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                      placeholder="https://.../standby.png"
+                    />
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(event) =>
+                        void handleImageFile(event.target.files?.[0], "standbyImageUrl")
+                      }
+                      className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
+                    />
+                  </div>
                 </Field>
                 <Field label="Subtitulo standby" className="md:col-span-2">
                   <textarea
@@ -1339,7 +1378,7 @@ export default function RestaurantesPage() {
                     placeholder="Pide tu tabla ahora"
                   />
                 </Field>
-                <Field label="URL QR/CTA">
+                <Field label="Enlace del botón o QR">
                   <input
                     value={formState.standbyCtaQrUrl}
                     onChange={(event) =>
@@ -1364,6 +1403,30 @@ export default function RestaurantesPage() {
                     }
                   />
                 </label>
+                <div className="relative min-h-56 overflow-hidden rounded-lg border border-bone/10 bg-obsidian p-5 md:col-span-2">
+                  {formState.standbyImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={formState.standbyImageUrl}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover opacity-25"
+                    />
+                  ) : null}
+                  <div className="relative">
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-mezcal">
+                      Preview standby
+                    </p>
+                    <p className="mt-3 font-display text-4xl text-bone">
+                      {formState.standbyTitle || "HOSTER LIVE"}
+                    </p>
+                    <p className="mt-2 max-w-xl text-lg font-semibold text-bone/70">
+                      {formState.standbySubtitle || "La proxima jugada esta por comenzar"}
+                    </p>
+                    <p className="mt-4 inline-flex rounded-lg border border-mezcal/25 bg-mezcal/10 px-4 py-2 text-sm font-black text-mezcal">
+                      {formState.standbyPromoText || "Compra tus tablas con tu hostess"}
+                    </p>
+                  </div>
+                </div>
               </FormSection>
 
               <FormSection title="Configuracion de juego">
@@ -1541,6 +1604,25 @@ export default function RestaurantesPage() {
                       );
                     })}
                   </div>
+                  <label className="mt-3 grid gap-2 sm:max-w-xs">
+                    <span className="text-sm font-semibold text-bone">Costo default</span>
+                    <select
+                      value={formState.defaultTablePrice}
+                      onChange={(event) =>
+                        setFormState((currentState) => ({
+                          ...currentState,
+                          defaultTablePrice: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      {formState.allowedPrices.map((price) => (
+                        <option key={price} value={price}>
+                          {formatCurrency(price)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-sm font-semibold text-bone">Modalidades permitidas</p>

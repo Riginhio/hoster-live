@@ -5,7 +5,7 @@ import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 import { getCardById, getDeckCards, normalizeDeckId, type DeckId } from "@/lib/decks";
 
-export type SessionStatus = "active" | "finalized";
+export type SessionStatus = "active" | "completed" | "cancelled" | "closed_without_winner";
 export type AutoplayStatus = "idle" | "countdown" | "playing" | "paused" | "finished";
 
 export type Session = {
@@ -15,7 +15,7 @@ export type Session = {
   restaurantName: string;
   operatorUserId?: string;
   operatorUsername?: string;
-  operatorRole?: "manager" | "play";
+  operatorRole?: "manager" | "play" | "supervisor";
   createdAt: string;
   startedAt: string;
   endedAt?: string;
@@ -110,7 +110,7 @@ export function getSessionDeck(sessionId: string, deckId?: string) {
 }
 
 export function findSessionCard(cardId: string, deckId?: string) {
-  return getCardById(deckId, cardId) ?? getCardById("loteria", cardId);
+  return getCardById(deckId, cardId);
 }
 
 export function hydrateSessionCards(cardIds: string[], deckId?: string) {
@@ -207,7 +207,7 @@ function normalizeSession(session: Partial<Session>): Session {
     winnerFolio: session.winnerFolio,
     winnerCards: session.winnerCards ?? [],
     autoplayStatus:
-      session.autoplayStatus ?? (session.status === "finalized" ? "finished" : "idle"),
+      session.autoplayStatus ?? (session.status !== "active" ? "finished" : "idle"),
     autoplayIntervalSeconds: session.autoplayIntervalSeconds ?? 5,
     preStartCountdownSeconds: session.preStartCountdownSeconds ?? 60,
     preStartStartedAt: session.preStartStartedAt,
@@ -215,7 +215,10 @@ function normalizeSession(session: Partial<Session>): Session {
     playStartedAt: session.playStartedAt,
     playEndedAt: session.playEndedAt,
     activePromotions: session.activePromotions ?? [],
-    status: session.status ?? "active",
+    status:
+      (session.status as string | undefined) === "finalized"
+        ? "completed"
+        : session.status ?? "active",
     durationSeconds: session.durationSeconds ?? 0,
   };
 }
@@ -239,7 +242,7 @@ function finalizeSession(session: Session, endedAt: string): Session {
   return normalizeSession({
     ...session,
     endedAt,
-    status: "finalized",
+    status: "closed_without_winner",
     autoplayStatus: "finished",
     lastUpdatedAt: endedAt,
     playEndedAt: session.playEndedAt ?? endedAt,
@@ -419,7 +422,11 @@ export function createSession(
   return createdSession;
 }
 
-export function updateSession(sessionId: string, updates: Partial<Omit<Session, "id">>) {
+export function updateSession(
+  sessionId: string,
+  updates: Partial<Omit<Session, "id">>,
+  options: { syncSupabase?: boolean } = {},
+) {
   const sessions = getSessions();
   const now = new Date().toISOString();
   const updatedSessions = sessions.map((session) => {
@@ -438,7 +445,7 @@ export function updateSession(sessionId: string, updates: Partial<Omit<Session, 
     }
 
     if (
-      (updates.autoplayStatus === "finished" || updates.status === "finalized" || updates.winnerFolio) &&
+      (updates.autoplayStatus === "finished" || updates.status !== undefined || updates.winnerFolio) &&
       session.playStartedAt &&
       !session.playEndedAt
     ) {
@@ -455,7 +462,7 @@ export function updateSession(sessionId: string, updates: Partial<Omit<Session, 
 
   saveSessions(updatedSessions);
   const updatedSession = updatedSessions.find((session) => session.id === sessionId);
-  if (updatedSession) {
+  if (updatedSession && options.syncSupabase !== false) {
     syncSessionToSupabase(updatedSession);
   }
   return updatedSession;
@@ -470,16 +477,36 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
 
   const endedAt = updates.endedAt ?? new Date().toISOString();
 
+  const nextStatus = updates.status ?? (session.winnerFolio || updates.winnerFolio ? "completed" : "closed_without_winner");
+
   return updateSession(sessionId, {
     ...updates,
     endedAt,
-    status: "finalized",
+    status: nextStatus,
     autoplayStatus: "finished",
     playEndedAt: updates.playEndedAt ?? session.playEndedAt ?? endedAt,
     durationSeconds:
       (updates.durationSeconds ??
       session.durationSeconds) ||
       calculatePlayDurationSeconds(session, endedAt),
+  });
+}
+
+export function cancelSession(sessionId: string) {
+  const session = getSessionById(sessionId);
+
+  if (!session) {
+    return undefined;
+  }
+
+  const endedAt = new Date().toISOString();
+
+  return updateSession(sessionId, {
+    endedAt,
+    status: "cancelled",
+    autoplayStatus: "finished",
+    playEndedAt: session.playEndedAt ?? endedAt,
+    durationSeconds: session.durationSeconds || calculatePlayDurationSeconds(session, endedAt),
   });
 }
 

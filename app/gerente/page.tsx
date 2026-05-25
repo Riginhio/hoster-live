@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Play, Sparkles, Table2 } from "lucide-react";
+import { AlertTriangle, Play, Sparkles, Table2, X } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/Button";
 import { ButtonLink } from "@/components/ui/ButtonLink";
@@ -12,19 +12,25 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import type { WinMode } from "@/lib/loteria";
 import type { DeckId } from "@/lib/decks";
 import { calculateFinancialBreakdown } from "@/lib/finance";
-import { getActiveBoardBatch, type BoardBatch } from "@/lib/boards/boardBatchStorage";
+import {
+  getActiveBoardBatch,
+  getActiveBoardBatchByDeck,
+  type BoardBatch,
+} from "@/lib/boards/boardBatchStorage";
 import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
 import {
   getLastGameConfig,
   saveLastGameConfig,
+  saveLastGameConfigByType,
   type LastGameConfig,
 } from "@/lib/sessions/lastGameConfigStorage";
 import { createSession } from "@/lib/sessions/sessionStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
 import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { RestaurantConfig } from "@/lib/types";
+import { preloadDeckImages } from "@/lib/decks/preloadImages";
 
-const quickTableCounts = [20, 30, 50];
+const quickTableCounts = [30, 50];
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -56,9 +62,9 @@ function getFallbackRestaurant(restaurants: RestaurantConfig[], restaurantId?: s
 function getDraftConfig(restaurant: RestaurantConfig, activeTables: number): DraftGame {
   const lastConfig = getLastGameConfig(restaurant.id);
   const tablePrice =
-    lastConfig && [50, 100, 150].includes(lastConfig.tablePrice)
-      ? lastConfig.tablePrice
-      : [50, 100, 150].find((price) => restaurant.allowedPrices.includes(price)) ?? 50;
+    restaurant.allowedPrices.includes(restaurant.defaultTablePrice)
+      ? restaurant.defaultTablePrice
+      : restaurant.allowedPrices[0] ?? 50;
   const allowedNormalModes = normalModeOptions.filter((mode) => restaurant.allowedModes.includes(mode));
   const mode =
     lastConfig && allowedNormalModes.includes(lastConfig.mode)
@@ -69,7 +75,7 @@ function getDraftConfig(restaurant: RestaurantConfig, activeTables: number): Dra
     activeTables,
     tablePrice,
     mode,
-    deckId: restaurant.enabledDecks[0] ?? restaurant.activeDeck,
+    deckId: restaurant.activeDeck ?? restaurant.enabledDecks[0] ?? "loteria",
   };
 }
 
@@ -81,6 +87,8 @@ export default function GerentePage() {
   const [draftGame, setDraftGame] = useState<DraftGame | null>(null);
   const [lastConfig, setLastConfig] = useState<LastGameConfig | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
+  const [isStartingGame, setIsStartingGame] = useState(false);
   const venueRole = currentUser?.venueRole ?? "manager";
   const isPlay = venueRole === "play";
 
@@ -105,6 +113,21 @@ export default function GerentePage() {
       document.body.style.overflow = previousOverflow;
     };
   }, [draftGame]);
+
+  useEffect(() => {
+    if (!isSpecialModalOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsSpecialModalOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isSpecialModalOpen]);
 
   const restaurant = useMemo(
     () => getFallbackRestaurant(restaurants, currentUser?.restaurantId),
@@ -138,12 +161,26 @@ export default function GerentePage() {
       return;
     }
 
+    if (!restaurant.allowedTableCounts.includes(activeTables)) {
+      setFeedback("Esa cantidad de tablas no esta habilitada por Master.");
+      return;
+    }
+
     if (activeTables > activeBatch.quantity) {
       setFeedback(`El lote activo solo tiene ${activeBatch.quantity} tablas disponibles.`);
       return;
     }
 
-    setDraftGame(getDraftConfig(restaurant, activeTables));
+    const nextDraft = getDraftConfig(restaurant, activeTables);
+    const deckBatch = getActiveBoardBatchByDeck(restaurant.id, nextDraft.deckId);
+
+    if (!deckBatch) {
+      setFeedback("No hay lote activo para el deck seleccionado.");
+      return;
+    }
+
+    setActiveBatch(deckBatch);
+    setDraftGame(nextDraft);
   }
 
   function startQuickGame() {
@@ -151,11 +188,19 @@ export default function GerentePage() {
       return;
     }
 
+    const deckBatch = getActiveBoardBatchByDeck(restaurant.id, draftGame.deckId);
+
+    if (!deckBatch) {
+      setFeedback("No hay lote activo para el deck seleccionado.");
+      return;
+    }
+
+    setIsStartingGame(true);
     const commissionPercent = restaurant.restaurantCommissionPercent;
     const createdAt = new Date().toISOString();
 
     const createdSession = createSession({
-      batchId: activeBatch.id,
+      batchId: deckBatch.id,
       restaurantId: restaurant.id,
       restaurantName: restaurant.name,
       mode: draftGame.mode,
@@ -181,15 +226,16 @@ export default function GerentePage() {
       grossRevenue: financialBreakdown.grossRevenue,
       prizeAmount: financialBreakdown.prizeAmount,
       autoplayStatus: "idle",
-      autoplayIntervalSeconds: 5,
+      autoplayIntervalSeconds: Math.max(3, Math.round(restaurant.autoplayInterval / 1000)),
       preStartCountdownSeconds: 60,
-      activePromotions: getActiveQrCampaignsForRestaurant(restaurant.id),
+      activePromotions: getActiveQrCampaignsForRestaurant(restaurant.id, "general"),
       operatorUserId: currentUser?.userId,
       operatorUsername: currentUser?.email ?? currentUser?.name,
       operatorRole: venueRole,
       createdAt,
     });
     void createRealtimeSession(createdSession);
+    void preloadDeckImages(draftGame.deckId, "gerente-start");
 
     const savedConfig = saveLastGameConfig(restaurant.id, {
       activeTables: draftGame.activeTables,
@@ -197,6 +243,16 @@ export default function GerentePage() {
       mode: draftGame.mode,
       createdAt,
     });
+    saveLastGameConfigByType(
+      restaurant.id,
+      draftGame.activeTables === 50 ? "normal_50" : "normal_30",
+      {
+        activeTables: draftGame.activeTables,
+        tablePrice: draftGame.tablePrice,
+        mode: draftGame.mode,
+        createdAt,
+      },
+    );
 
     setLastConfig(savedConfig);
     setDraftGame(null);
@@ -265,10 +321,10 @@ export default function GerentePage() {
             </p>
           </div>
           {!isPlay ? (
-            <ButtonLink href="/gerente/nueva-jugada" variant="secondary">
+            <Button variant="secondary" onClick={() => setIsSpecialModalOpen(true)}>
               <Sparkles className="h-4 w-4" />
               Jugada especial
-            </ButtonLink>
+            </Button>
           ) : null}
         </div>
 
@@ -284,16 +340,6 @@ export default function GerentePage() {
               Repetir jugada {tableCount}
             </Button>
           ))}
-          {!isPlay ? (
-            <ButtonLink
-              href="/gerente/nueva-jugada"
-              variant="secondary"
-              className="h-24 flex-col"
-            >
-              <Sparkles className="h-5 w-5" />
-              Jugada especial
-            </ButtonLink>
-          ) : null}
         </div>
 
         {feedback ? (
@@ -321,7 +367,7 @@ export default function GerentePage() {
             </div>
 
             <fieldset className="mt-5">
-              {restaurant.enabledDecks.length > 1 ? (
+              {!isPlay && restaurant.enabledDecks.length > 1 ? (
                 <div className="mb-4">
                   <legend className="mb-2 text-sm font-semibold text-bone/70">Deck</legend>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -329,7 +375,10 @@ export default function GerentePage() {
                       <button
                         key={deckId}
                         type="button"
-                        onClick={() => setDraftGame((current) => current && { ...current, deckId })}
+                        onClick={() => {
+                          setDraftGame((current) => current && { ...current, deckId });
+                          setActiveBatch(getActiveBoardBatchByDeck(restaurant.id, deckId) ?? null);
+                        }}
                         className={`h-12 rounded-lg border px-4 text-sm font-black transition ${
                           draftGame.deckId === deckId
                             ? "border-mezcal bg-mezcal text-obsidian"
@@ -342,7 +391,7 @@ export default function GerentePage() {
                   </div>
                 </div>
               ) : null}
-              <legend className="mb-2 text-sm font-semibold text-bone/70">Modalidad</legend>
+              <legend className="mb-2 text-sm font-semibold text-bone/70">Modalidad de juego</legend>
               <div className="grid gap-3 sm:grid-cols-2">
                 {normalModeOptions
                   .filter((mode) => restaurant.allowedModes.includes(mode))
@@ -402,10 +451,46 @@ export default function GerentePage() {
               <Button variant="secondary" onClick={() => setDraftGame(null)}>
                 Cancelar
               </Button>
-              <Button onClick={startQuickGame}>
+              <Button onClick={startQuickGame} disabled={isStartingGame}>
                 <Play className="h-4 w-4" />
-                Iniciar jugada
+                {isStartingGame ? "Iniciando..." : "Iniciar jugada"}
               </Button>
+            </div>
+          </Card>
+        </div>
+      ) : null}
+
+      {isSpecialModalOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-obsidian/80 px-3 py-4 backdrop-blur">
+          <Card accent className="w-full max-w-lg">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-mezcal">
+                  Jugada especial
+                </p>
+                <h3 className="mt-2 font-display text-4xl text-bone">Configurar sin iniciar</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSpecialModalOpen(false)}
+                className="grid h-10 w-10 place-items-center rounded-lg bg-bone/8 text-bone/70 transition hover:bg-bone/12"
+                title="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-bone/62">
+              Abre la configuracion completa de jugada especial. No se crea ni corre una jugada
+              hasta confirmar el formulario.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <Button variant="secondary" onClick={() => setIsSpecialModalOpen(false)}>
+                Cerrar
+              </Button>
+              <ButtonLink href="/gerente/nueva-jugada">
+                <Sparkles className="h-4 w-4" />
+                Configurar especial
+              </ButtonLink>
             </div>
           </Card>
         </div>

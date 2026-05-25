@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
 import type { RestaurantConfig } from "@/lib/types";
+import { decks, type DeckId, type GameId } from "@/lib/decks";
 import {
   activateBoardBatch,
   archiveBoardBatch,
@@ -42,14 +43,16 @@ function statusClassName(status: BoardBatch["status"]) {
 export default function MasterLotesPage() {
   const [batches, setBatches] = useState<BoardBatch[]>([]);
   const [restaurants, setRestaurants] = useState<RestaurantConfig[]>(() => getRestaurants());
-  const [restaurantId, setRestaurantId] = useState(restaurants[0]?.id ?? "");
-  const [name, setName] = useState("Lote operativo");
+  const [restaurantId, setRestaurantId] = useState("");
+  const [gameId, setGameId] = useState<GameId>("loteria");
+  const [deckId, setDeckId] = useState<DeckId>("loteria");
+  const [name, setName] = useState("Nombre Lote Operativo");
   const [quantity, setQuantity] = useState(50);
   const [validFrom, setValidFrom] = useState(today());
   const [validTo, setValidTo] = useState(nextMonth());
   const [error, setError] = useState<string | null>(null);
   const selectedRestaurant = useMemo(
-    () => restaurants.find((restaurant) => restaurant.id === restaurantId) ?? restaurants[0],
+    () => restaurants.find((restaurant) => restaurant.id === restaurantId),
     [restaurantId, restaurants],
   );
   const allowedQuantities = useMemo(
@@ -67,7 +70,6 @@ export default function MasterLotesPage() {
   useEffect(() => {
     const loadedRestaurants = getRestaurants();
     setRestaurants(loadedRestaurants);
-    setRestaurantId((currentId) => currentId || loadedRestaurants[0]?.id || "");
     refreshBatches();
   }, []);
 
@@ -85,10 +87,29 @@ export default function MasterLotesPage() {
       return;
     }
 
+    if (!selectedRestaurant.enabledDecks.includes(deckId)) {
+      setError("El deck seleccionado no esta habilitado para este restaurante.");
+      return;
+    }
+
+    const activeDuplicate = batches.find(
+      (batch) =>
+        batch.restaurantId === selectedRestaurant.id &&
+        batch.deckId === deckId &&
+        batch.status === "active",
+    );
+
+    if (activeDuplicate) {
+      setError("Ese restaurante ya tiene un lote activo con este deck. Desactivalo o archivalo antes de crear otro.");
+      return;
+    }
+
     createBoardBatch({
       restaurantId: selectedRestaurant.id,
       restaurantName: selectedRestaurant.name,
       name,
+      gameId,
+      deckId,
       quantity,
       validFrom,
       validTo,
@@ -142,9 +163,29 @@ export default function MasterLotesPage() {
               onChange={(event) => setRestaurantId(event.target.value)}
               className={inputClassName}
             >
+              <option value="">Seleccionar lote</option>
               {restaurants.map((restaurant) => (
                 <option key={restaurant.id} value={restaurant.id}>
                   {restaurant.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={gameId}
+              onChange={(event) => setGameId(event.target.value as GameId)}
+              className={inputClassName}
+            >
+              <option value="loteria">Loteria</option>
+            </select>
+            <select
+              value={deckId}
+              onChange={(event) => setDeckId(event.target.value as DeckId)}
+              className={inputClassName}
+              disabled={!selectedRestaurant}
+            >
+              {(selectedRestaurant?.enabledDecks ?? (Object.keys(decks) as DeckId[])).map((deck) => (
+                <option key={deck} value={deck}>
+                  {decks[deck].label}
                 </option>
               ))}
             </select>
@@ -152,7 +193,7 @@ export default function MasterLotesPage() {
               value={name}
               onChange={(event) => setName(event.target.value)}
               className={inputClassName}
-              placeholder="Nombre del lote"
+              placeholder="Nombre Lote Operativo"
             />
             <select
               value={quantity}
@@ -203,8 +244,9 @@ export default function MasterLotesPage() {
                     {batch.status}
                   </span>
                 </div>
-                <div className="mt-3 grid gap-2 text-sm text-bone/62 md:grid-cols-5">
+                <div className="mt-3 grid gap-2 text-sm text-bone/62 md:grid-cols-6">
                   <p>{batch.restaurantName}</p>
+                  <p>{decks[batch.deckId].label}</p>
                   <p>{batch.quantity} tablas</p>
                   <p>{batch.validFrom}</p>
                   <p>{batch.validTo}</p>

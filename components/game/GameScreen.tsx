@@ -44,6 +44,8 @@ import {
   type RealtimeSessionDebugRow,
 } from "@/lib/supabase/sessionRealtime";
 import { getDeckCards } from "@/lib/decks";
+import { getTvControl, type TvControl } from "@/lib/tv/tvControlStorage";
+import { preloadDeckImages, resetDeckPreloadCache } from "@/lib/decks/preloadImages";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -127,9 +129,12 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [lastRealtimeError, setLastRealtimeError] = useState("");
   const [lastRealtimeSessionFound, setLastRealtimeSessionFound] = useState(false);
   const [latestRealtimeDebugRow, setLatestRealtimeDebugRow] = useState<RealtimeSessionDebugRow | null>(null);
+  const [tvControl, setTvControl] = useState<TvControl | undefined>();
   const lastSyncSignatureRef = useRef("");
   const previousCalledCountRef = useRef(0);
   const previousWinnerFolioRef = useRef<string | undefined>(undefined);
+  const lastImageTimingRef = useRef("");
+  const previousDeckIdRef = useRef<string | undefined>(undefined);
   const supabaseStatus = getSupabaseConfigStatus();
   const supabaseDebugStatus = getSupabaseClientDebugStatus();
   const missingSupabaseVariables = supabaseStatus.missingVariables.join(", ");
@@ -143,6 +148,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         : realtimeStatus === "disconnected"
         ? "Realtime desconectado"
         : "Fallback local";
+  const tvDeliveryLabel =
+    realtimeStatus === "connected"
+      ? "Carta enviada"
+      : realtimeStatus === "supabase-polling"
+        ? "Sincronizando TV..."
+        : realtimeStatus === "disconnected"
+          ? "Reconectando realtime"
+          : syncBadgeLabel;
 
   const restaurant = getRestaurantById(restaurantId);
   const tvRestaurantId = restaurant.id;
@@ -160,15 +173,56 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     restaurant.standbyPromoText || "Compra tus tablas con tu hostess";
   const standbyCtaText = restaurant.standbyCtaText || "Pide tu tabla ahora";
   const standbyPromotions = restaurant.standbyRotatePromotions
-    ? getActiveQrCampaignsForRestaurant(tvRestaurantId)
+    ? getActiveQrCampaignsForRestaurant(tvRestaurantId, "tv_standby")
     : [];
   const visualStatus = activeSession?.autoplayStatus === "countdown"
     ? "countdown"
-    : activeSession?.status === "finalized"
+    : activeSession?.status && activeSession.status !== "active"
       ? "finished"
       : winner
         ? "winner"
-        : activeSession?.autoplayStatus ?? "idle";
+      : activeSession?.autoplayStatus ?? "idle";
+
+  useEffect(() => {
+    const nextDeckId = activeSession?.deckId ?? restaurant.activeDeck;
+
+    if (previousDeckIdRef.current && previousDeckIdRef.current !== nextDeckId) {
+      setCalledCards([]);
+      setWinner(null);
+      lastImageTimingRef.current = "";
+      previousCalledCountRef.current = 0;
+      previousWinnerFolioRef.current = undefined;
+      resetDeckPreloadCache(previousDeckIdRef.current);
+    }
+
+    previousDeckIdRef.current = nextDeckId;
+    void preloadDeckImages(activeSession?.deckId ?? restaurant.activeDeck, "tv");
+  }, [activeSession?.deckId, restaurant.activeDeck]);
+
+  useEffect(() => {
+    if (!currentCard) {
+      return;
+    }
+
+    const timingLabel = `[HL timing] TV render final ${currentCard.id}`;
+    console.time(timingLabel);
+    requestAnimationFrame(() => {
+      console.timeEnd(timingLabel);
+    });
+  }, [currentCard]);
+
+  useEffect(() => {
+    const refreshTvControl = () => setTvControl(getTvControl(tvRestaurantId));
+
+    refreshTvControl();
+    window.addEventListener("storage", refreshTvControl);
+    const intervalId = window.setInterval(refreshTvControl, 2000);
+
+    return () => {
+      window.removeEventListener("storage", refreshTvControl);
+      window.clearInterval(intervalId);
+    };
+  }, [tvRestaurantId]);
 
   const statusLabel = useMemo(() => {
     const labels: Record<string, string> = {
@@ -231,6 +285,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             calculatedPrize: storedSession.prizeAmount,
             createdAt: storedSession.createdAt,
           });
+          if (storedSession.calledCards.length > previousCalledCountRef.current) {
+            const timingLabel = `[HL timing] TV recepcion ${storedSession.calledCards.at(-1)}`;
+            console.time(timingLabel);
+            console.timeEnd(timingLabel);
+          }
           setCalledCards(isCountdownSession ? [] : nextCalledCards);
 
           if (!isCountdownSession && !sessionIdChanged) {
@@ -361,6 +420,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     const unsubscribe = subscribeToRestaurantSession(
       realtimeRestaurantId,
       (session) => {
+        if (session?.called_cards?.length) {
+          const timingLabel = `[HL timing] TV recepcion realtime ${session.called_cards.at(-1)}`;
+          console.time(timingLabel);
+          console.timeEnd(timingLabel);
+        }
         const nextSession = session ? realtimeSessionToSession(session) : null;
         setRealtimeSession(nextSession);
         setLastRealtimeSessionFound(Boolean(nextSession));
@@ -431,10 +495,26 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     setAudioEnabled(false);
   }
 
+  if (tvControl?.disabled) {
+    return (
+      <div className="screen-safe grid place-items-center bg-obsidian p-8">
+        <section className="text-center">
+          <p className="text-xs font-black uppercase tracking-[0.3em] text-mezcal">
+            Pantalla temporalmente desactivada
+          </p>
+          <h1 className="mt-4 font-display text-6xl text-bone">{restaurant.name}</h1>
+        </section>
+      </div>
+    );
+  }
+
+  const tvOverlay = <TvBroadcastOverlay control={tvControl} restaurantName={restaurant.name} />;
+
   if (visualStatus === "countdown") {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
-        <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
+        {tvOverlay}
+        <SyncModeBadge label={tvDeliveryLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
         <RealtimeDebugPanel
           channelStatus={channelStatus}
           clientCreated={supabaseDebugStatus.clientCreated}
@@ -537,7 +617,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   if (visualStatus === "finished" || visualStatus === "idle") {
     return (
       <div className="screen-safe cantina-grid grid place-items-center bg-obsidian p-4 md:p-8">
-        <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
+        {tvOverlay}
+        <SyncModeBadge label={tvDeliveryLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
         <RealtimeDebugPanel
           channelStatus={channelStatus}
           clientCreated={supabaseDebugStatus.clientCreated}
@@ -644,11 +725,26 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                       key={promotion.id}
                       className="rounded-lg border border-bone/10 bg-bone/[0.045] p-4"
                     >
+                      {promotion.bannerImageUrl ? (
+                        <img
+                          src={promotion.bannerImageUrl}
+                          alt=""
+                          className="mb-3 h-28 w-full rounded-lg object-cover"
+                        />
+                      ) : null}
                       <div className="flex gap-3">
-                        <Megaphone className="mt-1 shrink-0 text-mezcal" size={20} />
+                        {promotion.sponsorLogoUrl ? (
+                          <img
+                            src={promotion.sponsorLogoUrl}
+                            alt={promotion.sponsorName}
+                            className="h-10 w-10 shrink-0 rounded-lg bg-bone object-contain p-1"
+                          />
+                        ) : (
+                          <Megaphone className="mt-1 shrink-0 text-mezcal" size={20} />
+                        )}
                         <div>
                           <p className="text-xs font-black uppercase tracking-[0.2em] text-mezcal">
-                            Promo activa
+                            {promotion.sponsorName || "Promo activa"}
                           </p>
                           <p className="mt-1 font-display text-2xl text-bone">
                             {promotion.title}
@@ -663,7 +759,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 </div>
               ) : null}
 
-              {activeSession?.status === "finalized" ? (
+              {activeSession?.status && activeSession.status !== "active" ? (
                 <div className="rounded-lg border border-agave/20 bg-agave/10 p-4">
                   <p className="text-xs font-black uppercase tracking-[0.22em] text-agave">
                     Ultima tabla ganadora
@@ -701,7 +797,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
   return (
     <div className="screen-safe cantina-grid bg-obsidian p-4 md:p-6">
-      <SyncModeBadge label={syncBadgeLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
+      {tvOverlay}
+      <SyncModeBadge label={tvDeliveryLabel} status={realtimeStatus} className="fixed right-4 top-4 z-50" />
       <RealtimeDebugPanel
         channelStatus={channelStatus}
         clientCreated={supabaseDebugStatus.clientCreated}
@@ -762,6 +859,38 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               </div>
             ) : null}
           </div>
+          {activePromotions.length ? (
+            <div className="mt-4 border-t border-bone/10 pt-4">
+              <p className="mb-3 text-xs font-black uppercase tracking-[0.22em] text-mezcal">
+                Promociones
+              </p>
+              <div className="grid gap-3">
+                {activePromotions.slice(0, 2).map((promotion) => (
+                  <div key={promotion.id} className="overflow-hidden rounded-lg border border-bone/10 bg-bone/[0.04]">
+                    {promotion.bannerImageUrl ? (
+                      <img src={promotion.bannerImageUrl} alt="" className="h-24 w-full object-cover" />
+                    ) : null}
+                    <div className="p-3">
+                      <div className="flex items-center gap-2">
+                        {promotion.sponsorLogoUrl ? (
+                          <img
+                            src={promotion.sponsorLogoUrl}
+                            alt={promotion.sponsorName}
+                            className="h-8 w-8 rounded bg-bone object-contain p-1"
+                          />
+                        ) : null}
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-mezcal">
+                          {promotion.sponsorName || restaurant.name}
+                        </p>
+                      </div>
+                      <p className="mt-2 font-display text-xl text-bone">{promotion.title}</p>
+                      <p className="mt-1 text-xs leading-5 text-bone/62">{promotion.message}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </aside>
 
         <main className="order-1 flex min-w-0 flex-col gap-4 xl:order-2">
@@ -906,6 +1035,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                     height={1141}
                     className="h-full w-full object-contain"
                     priority
+                    onLoad={() => {
+                      if (lastImageTimingRef.current === currentCard.id) {
+                        return;
+                      }
+
+                      lastImageTimingRef.current = currentCard.id;
+                      const timingLabel = `[HL timing] TV carga imagen ${currentCard.id}`;
+                      console.time(timingLabel);
+                      console.timeEnd(timingLabel);
+                    }}
                   />
                 ) : (
                   <div className="grid h-full place-items-center bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-obsidian">
@@ -995,6 +1134,49 @@ function SyncModeBadge({
     >
       {label}
     </span>
+  );
+}
+
+function TvBroadcastOverlay({
+  control,
+  restaurantName,
+}: {
+  control?: TvControl;
+  restaurantName: string;
+}) {
+  if (
+    !control ||
+    control.overrideType === "none" ||
+    !control.visibleUntil ||
+    new Date(control.visibleUntil).getTime() <= Date.now()
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none fixed inset-x-4 top-20 z-[60] mx-auto max-w-4xl">
+      <div className="overflow-hidden rounded-lg border border-mezcal/45 bg-obsidian/92 shadow-glow backdrop-blur">
+        {control.imageUrl ? (
+          <img
+            src={control.imageUrl}
+            alt=""
+            className={`w-full object-cover ${
+              control.overrideType === "banner" ? "max-h-56" : "max-h-[60vh]"
+            }`}
+          />
+        ) : null}
+        {control.message ? (
+          <div className="p-6 text-center">
+            <p className="text-xs font-black uppercase tracking-[0.28em] text-mezcal">
+              {restaurantName}
+            </p>
+            <p className="mt-3 font-display text-4xl leading-tight text-bone md:text-6xl">
+              {control.message}
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
