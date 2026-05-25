@@ -46,6 +46,7 @@ export default function NuevaJugadaPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [selectedDeckId, setSelectedDeckId] = useState<DeckId>("loteria");
+  const [isPreparingGame, setIsPreparingGame] = useState(false);
   const isPlay = currentUser?.venueRole === "play";
 
   const selectedRestaurant = useMemo(
@@ -245,6 +246,7 @@ export default function NuevaJugadaPage() {
     }
 
     try {
+      setIsPreparingGame(true);
       localStorage.setItem(configStorageKey, JSON.stringify(nextConfig));
       const createdSession = createSession({
         batchId: activeBatch.id,
@@ -280,8 +282,6 @@ export default function NuevaJugadaPage() {
         operatorUsername: currentUser?.email ?? currentUser?.name,
         operatorRole: currentUser?.venueRole ?? "manager",
       });
-      void createRealtimeSession(createdSession);
-      void preloadDeckImages(selectedDeckId, "especial-start");
       saveLastGameConfig(selectedRestaurant.id, {
         activeTables: nextConfig.activeTables,
         tablePrice: nextConfig.tablePrice,
@@ -294,14 +294,17 @@ export default function NuevaJugadaPage() {
         mode: nextConfig.mode,
         createdAt: nextConfig.createdAt ?? new Date().toISOString(),
       });
+      setFormError(null);
+      setConfig(nextConfig);
+      setSavedConfig(nextConfig);
+      router.push("/gerente/jugada-activa");
+      void createRealtimeSession(createdSession);
+      void preloadDeckImages(selectedDeckId, "especial-start");
+      return;
     } catch {
       // La experiencia local puede seguir funcionando aunque el navegador bloquee almacenamiento.
+      setIsPreparingGame(false);
     }
-
-    setFormError(null);
-    setConfig(nextConfig);
-    setSavedConfig(nextConfig);
-    router.push("/gerente/jugada-activa");
   }
 
   return (
@@ -502,9 +505,9 @@ export default function NuevaJugadaPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit">
+              <Button type="submit" disabled={isPreparingGame} className="min-h-12 w-full sm:w-auto">
                 <Play className="h-4 w-4" />
-                Iniciar jugada
+                {isPreparingGame ? "Preparando jugada..." : "Iniciar jugada"}
               </Button>
               {savedConfig ? (
                 <p className="text-sm font-semibold text-agave">

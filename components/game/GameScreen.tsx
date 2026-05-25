@@ -4,7 +4,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Megaphone, Volume2, VolumeX } from "lucide-react";
+import { Megaphone, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { BrandMark } from "@/components/brand/BrandMark";
 import type { LoteriaBoard, LoteriaCard } from "@/lib/loteria";
@@ -129,6 +129,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [lastRealtimeError, setLastRealtimeError] = useState("");
   const [lastRealtimeSessionFound, setLastRealtimeSessionFound] = useState(false);
   const [latestRealtimeDebugRow, setLatestRealtimeDebugRow] = useState<RealtimeSessionDebugRow | null>(null);
+  const [lastEventReceived, setLastEventReceived] = useState("sin eventos");
+  const [reconnectNonce, setReconnectNonce] = useState(0);
   const [tvControl, setTvControl] = useState<TvControl | undefined>();
   const lastSyncSignatureRef = useRef("");
   const previousCalledCountRef = useRef(0);
@@ -182,6 +184,42 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       : winner
         ? "winner"
       : activeSession?.autoplayStatus ?? "idle";
+  const activeSessionId = activeSession?.id ?? realtimeSession?.id ?? latestRealtimeDebugRow?.id ?? "-";
+  const sessionStatus =
+    activeSession?.status ??
+    realtimeSession?.status ??
+    latestRealtimeDebugRow?.status ??
+    "sin sesion";
+
+  function handleReconnectTv() {
+    console.info("[HOSTER LIVE][TV] Reconectar TV solicitado", {
+      restaurantId: realtimeRestaurantId,
+      activeSessionId,
+      sessionStatus,
+      channelStatus,
+    });
+    setLastEventReceived(`reconexion manual ${new Date().toLocaleTimeString("es-MX")}`);
+    setRealtimeStatus(supabaseStatus.connected ? "supabase-polling" : "fallback");
+    setReconnectNonce((current) => current + 1);
+  }
+
+  useEffect(() => {
+    console.info("[HOSTER LIVE][TV] debug", {
+      restaurantId: realtimeRestaurantId,
+      activeSessionId,
+      sessionStatus,
+      channelStatus,
+      realtimeStatus,
+      lastEventReceived,
+    });
+  }, [
+    activeSessionId,
+    channelStatus,
+    lastEventReceived,
+    realtimeRestaurantId,
+    realtimeStatus,
+    sessionStatus,
+  ]);
 
   useEffect(() => {
     const nextDeckId = activeSession?.deckId ?? restaurant.activeDeck;
@@ -369,6 +407,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       setLastRealtimeError(missingSupabaseVariables);
       setLastRealtimeSessionFound(false);
       setLatestRealtimeDebugRow(null);
+      setLastEventReceived(`fallback local ${new Date().toLocaleTimeString("es-MX")}`);
       return;
     }
 
@@ -387,6 +426,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         }
 
         setLatestRealtimeDebugRow(debugResult.data);
+        setLastEventReceived(
+          result.data
+            ? `poll ${new Date().toLocaleTimeString("es-MX")} ${result.data.status}/${result.data.autoplay_status}`
+            : `poll ${new Date().toLocaleTimeString("es-MX")} sin sesion`,
+        );
 
         if (result.error) {
           setRealtimeStatus("disconnected");
@@ -415,7 +459,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     }
 
     void queryRealtimeSession();
-    const realtimePollingId = globalThis.setInterval(queryRealtimeSession, 1800);
+    const realtimePollingId = globalThis.setInterval(queryRealtimeSession, 2500);
 
     const unsubscribe = subscribeToRestaurantSession(
       realtimeRestaurantId,
@@ -433,15 +477,35 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             ? {
                 id: session.id,
                 restaurant_id: session.restaurant_id,
+                status: session.status,
                 autoplay_status: session.autoplay_status,
+                last_updated_at: session.last_updated_at,
               }
             : null,
         );
+        setLastEventReceived(
+          session
+            ? `realtime ${new Date().toLocaleTimeString("es-MX")} ${session.status}/${session.autoplay_status}`
+            : `realtime ${new Date().toLocaleTimeString("es-MX")} sin payload`,
+        );
+        console.info("[HOSTER LIVE][TV] realtime event", {
+          restaurantId: realtimeRestaurantId,
+          activeSessionId: session?.id ?? "-",
+          sessionStatus: session?.status ?? "-",
+          autoplayStatus: session?.autoplay_status ?? "-",
+          calledCards: session?.called_cards?.length ?? 0,
+        });
         setRealtimeStatus(nextSession ? "connected" : "empty");
       },
       (state) => {
         latestChannelStatus = state.status;
         setChannelStatus(state.status);
+        setLastEventReceived(`canal ${state.status} ${new Date().toLocaleTimeString("es-MX")}`);
+        console.info("[HOSTER LIVE][TV] realtime channel", {
+          restaurantId: realtimeRestaurantId,
+          status: state.status,
+          label: state.label,
+        });
 
         if (state.status === "SUBSCRIBED") {
           setRealtimeStatus("connected");
@@ -463,7 +527,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       globalThis.clearInterval(realtimePollingId);
       unsubscribe();
     };
-  }, [missingSupabaseVariables, realtimeRestaurantId, supabaseStatus.connected]);
+  }, [missingSupabaseVariables, realtimeRestaurantId, reconnectNonce, supabaseStatus.connected]);
 
   useEffect(() => {
     setAudioEnabled(getStoredAudioEnabled());
@@ -523,7 +587,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           hasSession={lastRealtimeSessionFound}
           hasUrl={supabaseDebugStatus.hasUrl}
           latestRow={latestRealtimeDebugRow}
+          activeSessionId={activeSessionId}
+          lastEventReceived={lastEventReceived}
+          onReconnect={handleReconnectTv}
           restaurantId={realtimeRestaurantId}
+          sessionStatus={sessionStatus}
         />
         <section
           className="grid min-h-[calc(100vh-4rem)] w-full max-w-[1800px] place-items-center rounded-lg border border-mezcal/35 bg-[radial-gradient(circle_at_50%_18%,rgba(217,164,65,0.28),rgba(20,17,15,0.92)_48%,rgba(8,7,6,0.99)_100%)] p-6 text-center shadow-cantina md:p-10"
@@ -627,7 +695,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           hasSession={lastRealtimeSessionFound}
           hasUrl={supabaseDebugStatus.hasUrl}
           latestRow={latestRealtimeDebugRow}
+          activeSessionId={activeSessionId}
+          lastEventReceived={lastEventReceived}
+          onReconnect={handleReconnectTv}
           restaurantId={realtimeRestaurantId}
+          sessionStatus={sessionStatus}
         />
         <section
           className="relative grid min-h-[calc(100vh-4rem)] w-full max-w-[1800px] overflow-hidden rounded-lg border border-bone/10 bg-[radial-gradient(circle_at_50%_12%,rgba(217,164,65,0.18),rgba(31,161,135,0.12)_32%,rgba(20,17,15,0.94)_58%,rgba(8,7,6,0.99)_100%)] p-6 shadow-cantina md:p-10"
@@ -807,7 +879,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         hasSession={lastRealtimeSessionFound}
         hasUrl={supabaseDebugStatus.hasUrl}
         latestRow={latestRealtimeDebugRow}
+        activeSessionId={activeSessionId}
+        lastEventReceived={lastEventReceived}
+        onReconnect={handleReconnectTv}
         restaurantId={realtimeRestaurantId}
+        sessionStatus={sessionStatus}
       />
       <div className="mx-auto grid h-full max-w-[1500px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="order-2 rounded-lg border border-bone/10 bg-obsidian/70 p-4 shadow-cantina backdrop-blur xl:order-1">
@@ -1181,33 +1257,47 @@ function TvBroadcastOverlay({
 }
 
 function RealtimeDebugPanel({
+  activeSessionId,
   channelStatus,
   clientCreated,
   error,
   hasAnonKey,
   hasSession,
   hasUrl,
+  lastEventReceived,
   latestRow,
+  onReconnect,
   restaurantId,
+  sessionStatus,
 }: {
+  activeSessionId: string;
   channelStatus: RestaurantSessionChannelStatus | "NO_CLIENT";
   clientCreated: boolean;
   error: string;
   hasAnonKey: boolean;
   hasSession: boolean;
   hasUrl: boolean;
+  lastEventReceived: string;
   latestRow: RealtimeSessionDebugRow | null;
+  onReconnect: () => void;
   restaurantId: string;
+  sessionStatus: string;
 }) {
-  if (process.env.NODE_ENV !== "development") {
-    return null;
-  }
-
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-72 rounded-lg border border-bone/10 bg-obsidian/88 p-3 text-[11px] font-semibold text-bone/62 shadow-cantina backdrop-blur">
-      <p className="mb-2 text-xs font-black uppercase tracking-[0.18em] text-mezcal">
-        Realtime debug
-      </p>
+    <div className="fixed bottom-4 right-4 z-50 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-bone/10 bg-obsidian/88 p-3 text-[11px] font-semibold text-bone/62 shadow-cantina backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+          Realtime debug
+        </p>
+        <button
+          type="button"
+          onClick={onReconnect}
+          className="inline-flex h-9 items-center gap-2 rounded-lg border border-bone/10 bg-bone/10 px-3 text-xs font-black text-bone transition hover:bg-bone/15"
+        >
+          <RefreshCw size={14} />
+          Reconectar TV
+        </button>
+      </div>
       <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
         <dt>Supabase URL cargada</dt>
         <dd className={hasUrl ? "text-agave" : "text-[#ff9b91]"}>{hasUrl ? "si" : "no"}</dd>
@@ -1219,6 +1309,12 @@ function RealtimeDebugPanel({
         <dd className="text-bone">{channelStatus}</dd>
         <dt>Restaurant ID</dt>
         <dd className="text-bone">{restaurantId}</dd>
+        <dt>Active session ID</dt>
+        <dd className="max-w-32 truncate text-bone">{activeSessionId}</dd>
+        <dt>Session status</dt>
+        <dd className="text-bone">{sessionStatus}</dd>
+        <dt>Ultimo evento</dt>
+        <dd className="max-w-36 truncate text-bone">{lastEventReceived}</dd>
         <dt>Sesion Supabase</dt>
         <dd className={hasSession ? "text-agave" : "text-mezcal"}>{hasSession ? "si" : "no"}</dd>
         <dt>Ultima row</dt>
@@ -1229,6 +1325,8 @@ function RealtimeDebugPanel({
         <dd className="text-bone">{latestRow?.restaurant_id ?? "-"}</dd>
         <dt>Row autoplay</dt>
         <dd className="text-bone">{latestRow?.autoplay_status ?? "-"}</dd>
+        <dt>Row status</dt>
+        <dd className="text-bone">{latestRow?.status ?? "-"}</dd>
       </dl>
       {error ? (
         <p className="mt-2 rounded border border-chile/25 bg-chile/10 p-2 text-[#ff9b91]">

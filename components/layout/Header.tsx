@@ -9,9 +9,10 @@ import { useAuth } from "@/components/auth/AuthProvider";
 type HeaderProps = {
   title: string;
   eyebrow?: string;
+  onMenuClick?: () => void;
 };
 
-export function Header({ title, eyebrow = "HOSTER LIVE" }: HeaderProps) {
+export function Header({ title, eyebrow = "HOSTER LIVE", onMenuClick }: HeaderProps) {
   const { currentUser, logout } = useAuth();
 
   return (
@@ -27,7 +28,12 @@ export function Header({ title, eyebrow = "HOSTER LIVE" }: HeaderProps) {
           <h1 className="truncate font-display text-2xl text-bone md:text-3xl">{title}</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" className="h-10 w-10 px-0 md:hidden" aria-label="Menu">
+          <Button
+            variant="ghost"
+            className="h-11 w-11 px-0 md:hidden"
+            aria-label="Menu"
+            onClick={onMenuClick}
+          >
             <Menu size={18} />
           </Button>
           <Button variant="ghost" className="hidden h-10 w-10 px-0 md:inline-flex" aria-label="Alertas">

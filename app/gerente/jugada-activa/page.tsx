@@ -769,14 +769,14 @@ export default function JugadaActivaPage() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">
         <Card className="bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.18),rgba(20,17,15,0.94)_44%,rgba(8,7,6,0.98)_100%)]">
-          <div className="flex flex-wrap items-center justify-center gap-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center lg:justify-center">
             {audioEnabled ? (
-              <Button variant="secondary" onClick={disableAudio}>
+              <Button variant="secondary" onClick={disableAudio} className="min-h-12 w-full lg:w-auto">
                 <Volume2 size={18} />
                 Sonido activo
               </Button>
             ) : (
-              <Button variant="secondary" onClick={enableAudio}>
+              <Button variant="secondary" onClick={enableAudio} className="min-h-12 w-full lg:w-auto">
                 <VolumeX size={18} />
                 Sonido inactivo
               </Button>
@@ -784,6 +784,7 @@ export default function JugadaActivaPage() {
             <Button
               onClick={callNextCard}
               disabled={!nextCard || Boolean(winner) || autoplayStatus !== "playing"}
+              className="min-h-12 w-full lg:w-auto"
             >
               <SkipForward size={18} />
               Cantar siguiente carta
@@ -792,6 +793,7 @@ export default function JugadaActivaPage() {
               variant="secondary"
               onClick={startAutoplayDirect}
               disabled={!nextCard || Boolean(winner) || autoplayStatus === "playing"}
+              className="min-h-12 w-full lg:w-auto"
             >
               <Play size={18} />
               Iniciar autoplay directo
@@ -800,6 +802,7 @@ export default function JugadaActivaPage() {
               variant="secondary"
               onClick={pauseAutoplay}
               disabled={autoplayStatus !== "playing" && autoplayStatus !== "countdown"}
+              className="min-h-12 w-full lg:w-auto"
             >
               <Pause size={18} />
               Pausar
@@ -808,15 +811,16 @@ export default function JugadaActivaPage() {
               variant="secondary"
               onClick={resumeAutoplay}
               disabled={autoplayStatus !== "paused"}
+              className="min-h-12 w-full lg:w-auto"
             >
               <Play size={18} />
               Reanudar
             </Button>
-            <Button variant="secondary" onClick={cancelActiveSession}>
+            <Button variant="secondary" onClick={cancelActiveSession} className="min-h-12 w-full lg:w-auto">
               <Ban size={18} />
               Cancelar jugada
             </Button>
-            <Button variant="danger" onClick={closeActiveSession}>
+            <Button variant="danger" onClick={closeActiveSession} className="min-h-12 w-full lg:w-auto">
               <Power size={18} />
               {winner ? "Finalizar jugada" : "Cerrar sin ganador"}
             </Button>

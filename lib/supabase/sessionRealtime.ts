@@ -64,7 +64,9 @@ export type RestaurantSessionChannelState = {
 export type RealtimeSessionDebugRow = {
   id: string;
   restaurant_id: string;
+  status: string;
   autoplay_status: string;
+  last_updated_at: string;
 };
 
 type RealtimeResult<T> = {
@@ -338,8 +340,8 @@ export async function getActiveRealtimeSessionByRestaurantId(
     .from("game_sessions")
     .select("*")
     .eq("restaurant_id", slug)
-    .eq("status", "active")
-    .in("autoplay_status", ["idle", "countdown", "playing", "paused", "winner"])
+    .in("status", ["active", "completed", "cancelled", "closed_without_winner"])
+    .order("last_updated_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -374,8 +376,9 @@ export async function getLatestRealtimeSessionDebugByRestaurantId(
 
   const { data, error } = await supabase
     .from("game_sessions")
-    .select("id, restaurant_id, autoplay_status")
+    .select("id, restaurant_id, status, autoplay_status, last_updated_at")
     .eq("restaurant_id", slug)
+    .order("last_updated_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

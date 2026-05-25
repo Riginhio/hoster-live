@@ -14,6 +14,7 @@ import {
   Table2,
   TrendingUp,
   Users,
+  X,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { getSupabaseConfigStatus } from "@/lib/supabase/client";
@@ -48,7 +49,12 @@ const links: SidebarLink[] = [
   { href: "/tv/rancho-viejo", label: "Pantalla TV", icon: MonitorPlay, roles: ["tv"] },
 ];
 
-export function Sidebar() {
+type SidebarProps = {
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+};
+
+export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const supabaseStatus = getSupabaseConfigStatus();
   const { currentUser } = useAuth();
   const visibleLinks = links.filter((item) => {
@@ -59,8 +65,8 @@ export function Sidebar() {
     return !item.venueRoles || item.venueRoles.includes(currentUser.venueRole ?? "manager");
   });
 
-  return (
-    <aside className="hidden w-72 shrink-0 border-r border-bone/10 bg-obsidian/70 p-4 backdrop-blur lg:block">
+  const sidebarContent = (
+    <>
       <Link href="/master" className="mb-8 flex items-center gap-3 rounded-lg border border-mezcal/25 bg-mezcal/10 p-3">
         <BrandMark className="h-11 w-11" textClassName="text-lg" />
         <div>
@@ -85,6 +91,7 @@ export function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
+            onClick={onMobileClose}
             className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-bone/70 transition hover:bg-bone/10 hover:text-bone"
           >
             <item.icon size={18} className="text-mezcal" />
@@ -95,6 +102,37 @@ export function Sidebar() {
       <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-bone/30">
         Powered by Hoster Live
       </p>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden w-72 shrink-0 border-r border-bone/10 bg-obsidian/70 p-4 backdrop-blur lg:block">
+        {sidebarContent}
+      </aside>
+      {mobileOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-obsidian/72 backdrop-blur-sm"
+            aria-label="Cerrar menu"
+            onClick={onMobileClose}
+          />
+          <aside className="relative h-full w-[min(20rem,88vw)] overflow-y-auto border-r border-bone/10 bg-obsidian p-4 shadow-cantina">
+            <div className="mb-4 flex justify-end">
+              <button
+                type="button"
+                className="grid h-11 w-11 place-items-center rounded-lg bg-bone/10 text-bone"
+                aria-label="Cerrar menu"
+                onClick={onMobileClose}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            {sidebarContent}
+          </aside>
+        </div>
+      ) : null}
+    </>
   );
 }

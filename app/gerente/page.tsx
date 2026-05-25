@@ -196,6 +196,7 @@ export default function GerentePage() {
     }
 
     setIsStartingGame(true);
+    setFeedback("Preparando jugada...");
     const commissionPercent = restaurant.restaurantCommissionPercent;
     const createdAt = new Date().toISOString();
 
@@ -234,9 +235,6 @@ export default function GerentePage() {
       operatorRole: venueRole,
       createdAt,
     });
-    void createRealtimeSession(createdSession);
-    void preloadDeckImages(draftGame.deckId, "gerente-start");
-
     const savedConfig = saveLastGameConfig(restaurant.id, {
       activeTables: draftGame.activeTables,
       tablePrice: draftGame.tablePrice,
@@ -256,8 +254,9 @@ export default function GerentePage() {
 
     setLastConfig(savedConfig);
     setDraftGame(null);
-    setFeedback("Jugada iniciada y guardada como ultima configuracion del restaurante.");
     router.push("/gerente/jugada-activa");
+    void createRealtimeSession(createdSession);
+    void preloadDeckImages(draftGame.deckId, "gerente-start");
   }
 
   return (
@@ -328,13 +327,13 @@ export default function GerentePage() {
           ) : null}
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-4">
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
           {quickTableCounts.map((tableCount) => (
             <Button
               key={tableCount}
               onClick={() => openQuickGame(tableCount)}
               disabled={!restaurant || !activeBatch}
-              className="h-24 flex-col"
+              className="h-24 min-w-0 flex-col text-base"
             >
               <Table2 className="h-5 w-5" />
               Repetir jugada {tableCount}
@@ -361,7 +360,7 @@ export default function GerentePage() {
                   Repetir jugada {draftGame.activeTables}
                 </h3>
               </div>
-              <Button variant="ghost" onClick={() => setDraftGame(null)}>
+              <Button variant="ghost" onClick={() => setDraftGame(null)} disabled={isStartingGame}>
                 Cerrar
               </Button>
             </div>
@@ -375,11 +374,12 @@ export default function GerentePage() {
                       <button
                         key={deckId}
                         type="button"
+                        disabled={isStartingGame}
                         onClick={() => {
                           setDraftGame((current) => current && { ...current, deckId });
                           setActiveBatch(getActiveBoardBatchByDeck(restaurant.id, deckId) ?? null);
                         }}
-                        className={`h-12 rounded-lg border px-4 text-sm font-black transition ${
+                        className={`h-14 rounded-lg border px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
                           draftGame.deckId === deckId
                             ? "border-mezcal bg-mezcal text-obsidian"
                             : "border-bone/10 bg-bone/[0.04] text-bone hover:bg-bone/10"
@@ -400,7 +400,8 @@ export default function GerentePage() {
                     key={mode}
                     type="button"
                     onClick={() => setDraftGame((current) => current && { ...current, mode })}
-                    className={`h-12 rounded-lg border px-4 text-sm font-black transition ${
+                    disabled={isStartingGame}
+                    className={`h-14 rounded-lg border px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
                       draftGame.mode === mode
                         ? "border-agave bg-agave text-obsidian"
                         : "border-bone/10 bg-bone/[0.04] text-bone hover:bg-bone/10"
@@ -448,12 +449,12 @@ export default function GerentePage() {
             </dl>
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <Button variant="secondary" onClick={() => setDraftGame(null)}>
+              <Button variant="secondary" onClick={() => setDraftGame(null)} disabled={isStartingGame}>
                 Cancelar
               </Button>
-              <Button onClick={startQuickGame} disabled={isStartingGame}>
+              <Button onClick={startQuickGame} disabled={isStartingGame} className="min-h-12">
                 <Play className="h-4 w-4" />
-                {isStartingGame ? "Iniciando..." : "Iniciar jugada"}
+                {isStartingGame ? "Preparando jugada..." : "Iniciar jugada"}
               </Button>
             </div>
           </Card>
