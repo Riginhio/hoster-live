@@ -7,6 +7,9 @@ import { Layout } from "@/components/layout/Layout";
 import { getSessions, type Session, type SessionStatus } from "@/lib/sessions/sessionStorage";
 import {
   getSessionGrossRevenue,
+  getSessionAccumulatedContributionAmount,
+  getSessionAccumulatedPrizeAmount,
+  getSessionBasePrizeAmount,
   getSessionHlFixedFee,
   getSessionPrizeAmount,
   getSessionRestaurantCommissionAmount,
@@ -134,6 +137,26 @@ export default function MasterJugadasPage() {
         note: "Despues de fee HL",
       },
       {
+        label: "Acumulado generado",
+        value: formatCurrency(
+          finalizedSessions.reduce(
+            (total, session) => total + getSessionAccumulatedContributionAmount(session),
+            0,
+          ),
+        ),
+        note: "Descontado de normales",
+      },
+      {
+        label: "Acumulado agregado",
+        value: formatCurrency(
+          finalizedSessions.reduce(
+            (total, session) => total + getSessionAccumulatedPrizeAmount(session),
+            0,
+          ),
+        ),
+        note: "Jugadas acumulado",
+      },
+      {
         label: "Premios entregados",
         value: formatCurrency(
           finalizedSessions.reduce((total, session) => total + getSessionPrizeAmount(session), 0),
@@ -239,7 +262,7 @@ export default function MasterJugadasPage() {
         ) : null}
 
         <div className="hidden overflow-x-auto xl:block">
-          <table className="w-full min-w-[1180px] border-collapse">
+          <table className="w-full min-w-[1380px] border-collapse">
             <thead className="bg-bone/[0.035] text-left text-xs uppercase tracking-[0.16em] text-bone/45">
               <tr>
                 <th className="px-5 py-4 font-semibold">Restaurante</th>
@@ -251,6 +274,8 @@ export default function MasterJugadasPage() {
                 <th className="px-5 py-4 font-semibold">Comision Rest.</th>
                 <th className="px-5 py-4 font-semibold">Rest. neto</th>
                 <th className="px-5 py-4 font-semibold">Premio</th>
+                <th className="px-5 py-4 font-semibold">Premio base</th>
+                <th className="px-5 py-4 font-semibold">Acumulado</th>
                 <th className="px-5 py-4 font-semibold">Ganador</th>
                 <th className="px-5 py-4 font-semibold">Status</th>
               </tr>
@@ -286,6 +311,14 @@ export default function MasterJugadasPage() {
                   </td>
                   <td className="px-5 py-4 text-sm text-mezcal">
                     {formatCurrency(getSessionPrizeAmount(session))}
+                  </td>
+                  <td className="px-5 py-4 text-sm text-bone/68">
+                    {formatCurrency(getSessionBasePrizeAmount(session))}
+                  </td>
+                  <td className="px-5 py-4 text-sm text-bone/68">
+                    {session.gameType === "accumulated_special"
+                      ? `+${formatCurrency(getSessionAccumulatedPrizeAmount(session))}`
+                      : `-${formatCurrency(getSessionAccumulatedContributionAmount(session))}`}
                   </td>
                   <td className="px-5 py-4">
                     <span className="inline-flex items-center gap-2 rounded-full bg-mezcal/12 px-3 py-1 text-xs font-bold text-mezcal ring-1 ring-mezcal/25">

@@ -40,6 +40,11 @@ type RestaurantFormState = {
   restaurantCommissionPercent: string;
   hlCommissionMode: "fixed" | "percent";
   hlCommissionValue: string;
+  accumulatedEnabled: boolean;
+  accumulatedAmountPerGame: string;
+  accumulatedDay: "lunes" | "martes" | "miercoles" | "jueves" | "viernes" | "sabado" | "domingo";
+  accumulatedTablePrice: string;
+  accumulatedTableCount: string;
   activeDeck: DeckId;
   primaryColor: string;
   secondaryColor: string;
@@ -133,6 +138,11 @@ const emptyForm: RestaurantFormState = {
   restaurantCommissionPercent: "30",
   hlCommissionMode: "fixed",
   hlCommissionValue: "300",
+  accumulatedEnabled: false,
+  accumulatedAmountPerGame: "100",
+  accumulatedDay: "lunes",
+  accumulatedTablePrice: "300",
+  accumulatedTableCount: "30",
   activeDeck: "loteria",
   primaryColor: "#d9a441",
   secondaryColor: "#1fa187",
@@ -227,6 +237,11 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
     restaurantCommissionPercent: String(restaurant.restaurantCommissionPercent),
     hlCommissionMode: restaurant.hlCommissionMode,
     hlCommissionValue: String(restaurant.hlCommissionValue),
+    accumulatedEnabled: restaurant.accumulatedEnabled,
+    accumulatedAmountPerGame: String(restaurant.accumulatedAmountPerGame),
+    accumulatedDay: restaurant.accumulatedDay,
+    accumulatedTablePrice: String(restaurant.accumulatedTablePrice),
+    accumulatedTableCount: String(restaurant.accumulatedTableCount),
     activeDeck: restaurant.activeDeck,
     primaryColor: restaurant.primaryColor,
     secondaryColor: restaurant.secondaryColor,
@@ -264,6 +279,9 @@ function toFormState(restaurant: RestaurantConfig): RestaurantFormState {
 function validateForm(formState: RestaurantFormState) {
   const restaurantCommissionPercent = Number(formState.restaurantCommissionPercent);
   const hlCommissionValue = Number(formState.hlCommissionValue);
+  const accumulatedAmountPerGame = Number(formState.accumulatedAmountPerGame);
+  const accumulatedTablePrice = Number(formState.accumulatedTablePrice);
+  const accumulatedTableCount = Number(formState.accumulatedTableCount);
 
   if (!formState.name.trim()) {
     return "El nombre del restaurante es obligatorio.";
@@ -285,6 +303,13 @@ function validateForm(formState: RestaurantFormState) {
     return "La comision HL porcentual no puede ser mayor a 100%.";
   }
 
+  if (
+    formState.accumulatedEnabled &&
+    (!Number.isFinite(accumulatedAmountPerGame) || accumulatedAmountPerGame < 0)
+  ) {
+    return "El monto acumulado por jugada debe ser valido.";
+  }
+
   if (formState.allowedPrices.length === 0) {
     return "Selecciona al menos un costo permitido.";
   }
@@ -293,6 +318,10 @@ function validateForm(formState: RestaurantFormState) {
 
   if (!Number.isFinite(defaultTablePrice) || !formState.allowedPrices.includes(defaultTablePrice)) {
     return "El costo default debe estar dentro de los costos permitidos.";
+  }
+
+  if (formState.accumulatedEnabled && !formState.allowedPrices.includes(accumulatedTablePrice)) {
+    return "El costo de tabla acumulado debe estar dentro de los costos permitidos.";
   }
 
   if (formState.allowedPrices.some((price) => price % 50 !== 0)) {
@@ -305,6 +334,10 @@ function validateForm(formState: RestaurantFormState) {
 
   if (formState.allowedTableCounts.length === 0) {
     return "Selecciona al menos una cantidad de tablas.";
+  }
+
+  if (formState.accumulatedEnabled && !formState.allowedTableCounts.includes(accumulatedTableCount)) {
+    return "La cantidad de tablas del acumulado debe estar permitida.";
   }
 
   if (formState.activeGames.length === 0) {
@@ -497,6 +530,11 @@ export default function RestaurantesPage() {
       hlCommissionValue: Number(formState.hlCommissionValue),
       hlFixedFee:
         formState.hlCommissionMode === "fixed" ? Number(formState.hlCommissionValue) : 0,
+      accumulatedEnabled: formState.accumulatedEnabled,
+      accumulatedAmountPerGame: Number(formState.accumulatedAmountPerGame),
+      accumulatedDay: formState.accumulatedDay,
+      accumulatedTablePrice: Number(formState.accumulatedTablePrice),
+      accumulatedTableCount: Number(formState.accumulatedTableCount),
       activeDeck: normalizedActiveDeck,
       commissionHLPercent:
         formState.hlCommissionMode === "percent" ? Number(formState.hlCommissionValue) : 0,
@@ -1477,6 +1515,91 @@ export default function RestaurantesPage() {
                     className={inputClassName}
                   />
                 </Field>
+                <label className="flex items-center justify-between rounded-lg border border-agave/20 bg-agave/10 px-3 py-3 text-sm font-semibold text-bone md:col-span-2">
+                  Activar acumulado semanal
+                  <input
+                    type="checkbox"
+                    checked={formState.accumulatedEnabled}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        accumulatedEnabled: event.target.checked,
+                      }))
+                    }
+                  />
+                </label>
+                <Field label="Monto acumulado por jugada">
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={formState.accumulatedAmountPerGame}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        accumulatedAmountPerGame: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Dia de acumulado">
+                  <select
+                    value={formState.accumulatedDay}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        accumulatedDay: event.target.value as RestaurantFormState["accumulatedDay"],
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    {dayOptions.map((day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Costo tabla acumulado">
+                  <select
+                    value={formState.accumulatedTablePrice}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        accumulatedTablePrice: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    {formState.allowedPrices.map((price) => (
+                      <option key={price} value={price}>
+                        {formatCurrency(price)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Tablas acumulado">
+                  <select
+                    value={formState.accumulatedTableCount}
+                    onChange={(event) =>
+                      setFormState((currentState) => ({
+                        ...currentState,
+                        accumulatedTableCount: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    {formState.allowedTableCounts.map((tableCount) => (
+                      <option key={tableCount} value={tableCount}>
+                        {tableCount}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <div className="rounded-lg border border-bone/10 bg-bone/[0.035] p-3 text-sm font-semibold text-bone/65 md:col-span-2">
+                  Modalidad acumulado: Tabla llena
+                </div>
                 <Field label="Deck default">
                   <select
                     value={formState.activeDeck}

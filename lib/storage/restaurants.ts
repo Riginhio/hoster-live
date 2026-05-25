@@ -33,6 +33,11 @@ export const demoRestaurant: RestaurantConfig = {
   hlCommissionMode: "fixed",
   hlCommissionValue: 300,
   hlFixedFee: 300,
+  accumulatedEnabled: false,
+  accumulatedAmountPerGame: 100,
+  accumulatedDay: "lunes",
+  accumulatedTablePrice: 300,
+  accumulatedTableCount: 30,
   activeDeck: "loteria",
   commissionPercent: 20,
   commissionHLPercent: 0,
@@ -101,6 +106,11 @@ export const doroteoRestaurant: RestaurantConfig = {
   hlCommissionMode: "fixed",
   hlCommissionValue: 300,
   hlFixedFee: 300,
+  accumulatedEnabled: false,
+  accumulatedAmountPerGame: 100,
+  accumulatedDay: "lunes",
+  accumulatedTablePrice: 300,
+  accumulatedTableCount: 30,
   activeDeck: "loteria",
   commissionPercent: 25,
   commissionHLPercent: 0,
@@ -214,6 +224,16 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
   const hlCommissionMode = value.hlCommissionMode === "percent" ? "percent" : "fixed";
   const hlCommissionValue = normalizeNumber(value.hlCommissionValue, hlFixedFee);
   const commissionNetPercent = commissionHLPercent + commissionRestaurantPercent;
+  const accumulatedDay =
+    value.accumulatedDay === "lunes" ||
+    value.accumulatedDay === "martes" ||
+    value.accumulatedDay === "miercoles" ||
+    value.accumulatedDay === "jueves" ||
+    value.accumulatedDay === "viernes" ||
+    value.accumulatedDay === "sabado" ||
+    value.accumulatedDay === "domingo"
+      ? value.accumulatedDay
+      : fallback.accumulatedDay;
 
   return {
     id: slug,
@@ -246,6 +266,20 @@ function normalizeRestaurant(value: Partial<RestaurantConfig>): RestaurantConfig
     hlCommissionMode,
     hlCommissionValue,
     hlFixedFee,
+    accumulatedEnabled: value.accumulatedEnabled ?? fallback.accumulatedEnabled ?? false,
+    accumulatedAmountPerGame: normalizeNumber(
+      value.accumulatedAmountPerGame,
+      fallback.accumulatedAmountPerGame ?? 0,
+    ),
+    accumulatedDay,
+    accumulatedTablePrice: normalizeNumber(
+      value.accumulatedTablePrice,
+      fallback.accumulatedTablePrice ?? value.defaultTablePrice ?? fallback.defaultTablePrice,
+    ),
+    accumulatedTableCount: normalizeNumber(
+      value.accumulatedTableCount,
+      fallback.accumulatedTableCount ?? fallback.allowedTableCounts[0] ?? 30,
+    ),
     activeDeck: normalizeDeckId(value.activeDeck),
     commissionPercent: commissionNetPercent,
     commissionHLPercent,

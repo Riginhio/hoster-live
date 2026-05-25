@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Play, Sparkles, Table2, X } from "lucide-react";
+import { AlertTriangle, Play, Sparkles, Table2, Trophy, X } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/Button";
 import { ButtonLink } from "@/components/ui/ButtonLink";
@@ -26,9 +26,13 @@ import {
 } from "@/lib/sessions/lastGameConfigStorage";
 import { cancelSession, createSession } from "@/lib/sessions/sessionStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
-import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
+import { closeRealtimeSession, createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { RestaurantConfig } from "@/lib/types";
 import { preloadDeckImages } from "@/lib/decks/preloadImages";
+import {
+  getAccumulatedSummary,
+  getActiveAccumulatedWeek,
+} from "@/lib/accumulated/accumulatedStorage";
 
 const quickTableCounts = [30, 50];
 
@@ -39,6 +43,9 @@ const modeLabels: Record<WinMode, string> = {
   full_card: "Llena",
 };
 const normalModeOptions: WinMode[] = ["four_corners", "center_four", "x_shape", "full_card"];
+const supabaseSyncTimeoutMs = 5000;
+
+type RealtimeCreateResult = Awaited<ReturnType<typeof createRealtimeSession>>;
 
 type DraftGame = {
   activeTables: number;
@@ -77,6 +84,46 @@ function getDraftConfig(restaurant: RestaurantConfig, activeTables: number): Dra
     mode,
     deckId: restaurant.activeDeck ?? restaurant.enabledDecks[0] ?? "loteria",
   };
+}
+
+function navigateToActiveGame(router: ReturnType<typeof useRouter>) {
+  router.push("/gerente/jugada-activa");
+  window.setTimeout(() => {
+    if (window.location.pathname !== "/gerente/jugada-activa") {
+      window.location.href = "/gerente/jugada-activa";
+    }
+  }, 700);
+}
+
+function createRealtimeSessionWithTimeout(
+  session: Parameters<typeof createRealtimeSession>[0],
+): Promise<RealtimeCreateResult> {
+  let timedOut = false;
+  const realtimePromise = createRealtimeSession(session).catch(
+    (error): RealtimeCreateResult => ({
+      data: null,
+      error: error instanceof Error ? error : new Error("No se pudo sincronizar con Supabase."),
+      mode: "supabase",
+    }),
+  );
+  const timeoutPromise = new Promise<RealtimeCreateResult>((resolve) => {
+    window.setTimeout(() => {
+      timedOut = true;
+      resolve({
+        data: null,
+        error: new Error("Supabase tardo mas de 5 segundos. Reintenta iniciar la jugada."),
+        mode: "supabase",
+      });
+    }, supabaseSyncTimeoutMs);
+  });
+
+  void realtimePromise.then((result) => {
+    if (timedOut && result.data?.id) {
+      void closeRealtimeSession(result.data.id, { status: "cancelled" });
+    }
+  });
+
+  return Promise.race([realtimePromise, timeoutPromise]);
 }
 
 export default function GerentePage() {
@@ -148,6 +195,10 @@ export default function GerentePage() {
       hlFixedFee: restaurant.hlFixedFee,
     });
   }, [draftGame, restaurant]);
+  const accumulatedSummary = useMemo(
+    () => (restaurant ? getAccumulatedSummary(restaurant.id) : null),
+    [restaurant],
+  );
 
   function openQuickGame(activeTables: number) {
     if (!restaurant) {
@@ -196,9 +247,14 @@ export default function GerentePage() {
     }
 
     setIsStartingGame(true);
-    setFeedback("Preparando jugada...");
+    setFeedback("Creando sesion...");
     const commissionPercent = restaurant.restaurantCommissionPercent;
     const createdAt = new Date().toISOString();
+    const accumulatedContribution =
+      restaurant.accumulatedEnabled && draftGame.activeTables <= 50
+        ? Math.min(restaurant.accumulatedAmountPerGame, financialBreakdown.prizeAmount)
+        : 0;
+    const basePrizeAmount = financialBreakdown.prizeAmount;
 
     const createdSession = createSession({
       batchId: deckBatch.id,
@@ -225,7 +281,11 @@ export default function GerentePage() {
       commissionRestaurantAmount: financialBreakdown.commissionRestaurantAmount,
       commissionNetAmount: financialBreakdown.commissionNetAmount,
       grossRevenue: financialBreakdown.grossRevenue,
-      prizeAmount: financialBreakdown.prizeAmount,
+      prizeAmount: Math.max(0, basePrizeAmount - accumulatedContribution),
+      basePrizeAmount,
+      accumulatedContributionAmount: accumulatedContribution,
+      accumulatedPrizeAmount: 0,
+      gameType: "normal",
       autoplayStatus: "idle",
       autoplayIntervalSeconds: Math.max(3, Math.round(restaurant.autoplayInterval / 1000)),
       preStartCountdownSeconds: 60,
@@ -252,12 +312,13 @@ export default function GerentePage() {
       },
     );
 
-    const realtimeResult = await createRealtimeSession(createdSession);
+    setFeedback("Sincronizando con Supabase...");
+    const realtimeResult = await createRealtimeSessionWithTimeout(createdSession);
 
     if (realtimeResult.mode !== "supabase") {
       cancelSession(createdSession.id);
       setIsStartingGame(false);
-      setFeedback("Supabase no esta configurado. La TV no puede sincronizar entre dispositivos.");
+      setFeedback("Error: Supabase no esta configurado. La TV no puede sincronizar entre dispositivos.");
       return;
     }
 
@@ -265,17 +326,118 @@ export default function GerentePage() {
       cancelSession(createdSession.id);
       setIsStartingGame(false);
       setFeedback(
-        `No se pudo publicar la jugada en Supabase para TV: ${
+        `Error: ${
           realtimeResult.error?.message ?? "sin respuesta"
         }`,
       );
       return;
     }
 
+    setFeedback("Sesion creada");
     setLastConfig(savedConfig);
     setDraftGame(null);
-    router.push("/gerente/jugada-activa");
+    navigateToActiveGame(router);
     void preloadDeckImages(draftGame.deckId, "gerente-start");
+  }
+
+  async function startAccumulatedGame() {
+    if (!restaurant || isPlay) {
+      return;
+    }
+
+    const activeWeek = getActiveAccumulatedWeek(restaurant.id);
+
+    if (!restaurant.accumulatedEnabled || activeWeek.amount <= 0) {
+      setFeedback("No hay acumulado disponible para crear esta jugada.");
+      return;
+    }
+
+    const deckBatch = getActiveBoardBatchByDeck(restaurant.id, restaurant.activeDeck);
+    const activeTables = restaurant.accumulatedTableCount;
+
+    if (!deckBatch) {
+      setFeedback("No hay lote activo para el deck del restaurante.");
+      return;
+    }
+
+    if (!restaurant.allowedTableCounts.includes(activeTables)) {
+      setFeedback("La cantidad de tablas del acumulado no esta permitida por Master.");
+      return;
+    }
+
+    if (activeTables > deckBatch.quantity) {
+      setFeedback(`El lote activo solo tiene ${deckBatch.quantity} tablas disponibles.`);
+      return;
+    }
+
+    setIsStartingGame(true);
+    setFeedback("Creando sesion...");
+    const createdAt = new Date().toISOString();
+    const breakdown = calculateFinancialBreakdown({
+      activeTables,
+      tablePrice: restaurant.accumulatedTablePrice,
+      restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+      hlCommissionMode: restaurant.hlCommissionMode,
+      hlCommissionValue: restaurant.hlCommissionValue,
+      hlFixedFee: restaurant.hlFixedFee,
+    });
+    const basePrizeAmount = breakdown.prizeAmount;
+    const createdSession = createSession({
+      batchId: deckBatch.id,
+      restaurantId: restaurant.id,
+      restaurantName: restaurant.name,
+      mode: "full_card",
+      deckId: restaurant.activeDeck,
+      activeTables,
+      tablePrice: restaurant.accumulatedTablePrice,
+      restaurantCommissionPercent: restaurant.restaurantCommissionPercent,
+      restaurantCommissionAmount: breakdown.restaurantCommissionAmount,
+      hlCommissionMode: breakdown.hlCommissionMode,
+      hlCommissionValue: breakdown.hlCommissionValue,
+      hlCommissionAmount: breakdown.hlCommissionAmount,
+      commissionTotalPercent: breakdown.commissionTotalPercent,
+      commissionTotalAmount: breakdown.commissionTotalAmount,
+      hlFixedFee: breakdown.hlFixedFee,
+      restaurantNetAmount: breakdown.restaurantNetAmount,
+      commissionPercent: restaurant.restaurantCommissionPercent,
+      commissionHLPercent: breakdown.commissionHLPercent,
+      commissionRestaurantPercent: restaurant.restaurantCommissionPercent,
+      commissionNetPercent: breakdown.commissionNetPercent,
+      commissionHLAmount: breakdown.commissionHLAmount,
+      commissionRestaurantAmount: breakdown.commissionRestaurantAmount,
+      commissionNetAmount: breakdown.commissionNetAmount,
+      grossRevenue: breakdown.grossRevenue,
+      prizeAmount: basePrizeAmount + activeWeek.amount,
+      basePrizeAmount,
+      accumulatedContributionAmount: 0,
+      accumulatedPrizeAmount: activeWeek.amount,
+      gameType: "accumulated_special",
+      autoplayStatus: "idle",
+      autoplayIntervalSeconds: Math.max(3, Math.round(restaurant.autoplayInterval / 1000)),
+      preStartCountdownSeconds: 60,
+      activePromotions: getActiveQrCampaignsForRestaurant(restaurant.id, "general"),
+      operatorUserId: currentUser?.userId,
+      operatorUsername: currentUser?.email ?? currentUser?.name,
+      operatorRole: venueRole,
+      createdAt,
+    });
+    setFeedback("Sincronizando con Supabase...");
+    const realtimeResult = await createRealtimeSessionWithTimeout(createdSession);
+
+    if (realtimeResult.mode !== "supabase" || realtimeResult.error || !realtimeResult.data) {
+      cancelSession(createdSession.id);
+      setIsStartingGame(false);
+      setFeedback(
+        `Error: ${
+          realtimeResult.error?.message ?? "sin respuesta"
+        }`,
+      );
+      return;
+    }
+
+    setFeedback("Sesion creada");
+    navigateToActiveGame(router);
+    void preloadDeckImages(restaurant.activeDeck, "gerente-acumulado");
   }
 
   return (
@@ -366,6 +528,40 @@ export default function GerentePage() {
           </p>
         ) : null}
       </Card>
+
+      {accumulatedSummary ? (
+        <Card accent className="mt-6 border-agave/30 bg-agave/10">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-agave">
+                Acumulado semanal
+              </p>
+              <h2 className="mt-2 font-display text-4xl text-bone">
+                {formatCurrency(accumulatedSummary.activeWeek.amount)}
+              </h2>
+              <p className="mt-2 text-sm font-semibold text-bone/65">
+                Semana {accumulatedSummary.activeWeek.weekStart} a {accumulatedSummary.activeWeek.weekEnd} · Dia:{" "}
+                {accumulatedSummary.day} · Proximo: {accumulatedSummary.nextDate}
+              </p>
+              <p className="mt-1 text-sm text-bone/55">Modalidad: Tabla llena</p>
+            </div>
+            {!isPlay ? (
+              <Button
+                onClick={startAccumulatedGame}
+                disabled={
+                  isStartingGame ||
+                  !accumulatedSummary.enabled ||
+                  accumulatedSummary.activeWeek.amount <= 0
+                }
+                className="min-h-12 w-full md:w-auto"
+              >
+                <Trophy className="h-4 w-4" />
+                Crear jugada acumulado
+              </Button>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {draftGame && restaurant && financialBreakdown ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-obsidian/80 px-3 py-4 backdrop-blur">

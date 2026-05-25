@@ -42,6 +42,11 @@ export type Session = {
   commissionNetAmount: number;
   grossRevenue: number;
   prizeAmount: number;
+  basePrizeAmount: number;
+  accumulatedContributionAmount: number;
+  accumulatedPrizeAmount: number;
+  accumulatedAppliedAt?: string;
+  gameType: "normal" | "special" | "accumulated_special";
   calledCards: string[];
   winnerFolio?: string;
   winnerCards: string[];
@@ -203,6 +208,11 @@ function normalizeSession(session: Partial<Session>): Session {
     commissionNetAmount: session.commissionNetAmount ?? breakdown.commissionNetAmount,
     grossRevenue: session.grossRevenue ?? breakdown.grossRevenue,
     prizeAmount: session.prizeAmount ?? breakdown.prizeAmount,
+    basePrizeAmount: session.basePrizeAmount ?? session.prizeAmount ?? breakdown.prizeAmount,
+    accumulatedContributionAmount: session.accumulatedContributionAmount ?? 0,
+    accumulatedPrizeAmount: session.accumulatedPrizeAmount ?? 0,
+    accumulatedAppliedAt: session.accumulatedAppliedAt,
+    gameType: session.gameType ?? "normal",
     calledCards: session.calledCards ?? [],
     winnerFolio: session.winnerFolio,
     winnerCards: session.winnerCards ?? [],
@@ -284,6 +294,11 @@ export function createSession(
     | "commissionRestaurantAmount"
     | "commissionNetAmount"
     | "grossRevenue"
+    | "basePrizeAmount"
+    | "accumulatedContributionAmount"
+    | "accumulatedPrizeAmount"
+    | "accumulatedAppliedAt"
+    | "gameType"
     | "winnerFolio"
     | "winnerCards"
     | "autoplayStatus"
@@ -326,6 +341,11 @@ export function createSession(
         | "commissionRestaurantAmount"
         | "commissionNetAmount"
         | "grossRevenue"
+        | "basePrizeAmount"
+        | "accumulatedContributionAmount"
+        | "accumulatedPrizeAmount"
+        | "accumulatedAppliedAt"
+        | "gameType"
         | "winnerFolio"
         | "winnerCards"
         | "autoplayStatus"
@@ -397,6 +417,11 @@ export function createSession(
     commissionNetAmount: session.commissionNetAmount ?? breakdown.commissionNetAmount,
     grossRevenue: session.grossRevenue ?? breakdown.grossRevenue,
     prizeAmount: session.prizeAmount ?? breakdown.prizeAmount,
+    basePrizeAmount: session.basePrizeAmount ?? session.prizeAmount ?? breakdown.prizeAmount,
+    accumulatedContributionAmount: session.accumulatedContributionAmount ?? 0,
+    accumulatedPrizeAmount: session.accumulatedPrizeAmount ?? 0,
+    accumulatedAppliedAt: session.accumulatedAppliedAt,
+    gameType: session.gameType ?? "normal",
     calledCards: [],
     winnerFolio: undefined,
     winnerCards: [],
@@ -479,7 +504,7 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
 
   const nextStatus = updates.status ?? (session.winnerFolio || updates.winnerFolio ? "completed" : "closed_without_winner");
 
-  return updateSession(sessionId, {
+  const closedSession = updateSession(sessionId, {
     ...updates,
     endedAt,
     status: nextStatus,
@@ -490,6 +515,15 @@ export function closeSession(sessionId: string, updates: Partial<Omit<Session, "
       session.durationSeconds) ||
       calculatePlayDurationSeconds(session, endedAt),
   });
+
+  if (closedSession?.status === "completed") {
+    void import("@/lib/accumulated/accumulatedStorage").then(
+      ({ applyCompletedSessionToAccumulated }) =>
+        applyCompletedSessionToAccumulated(closedSession),
+    );
+  }
+
+  return closedSession;
 }
 
 export function cancelSession(sessionId: string) {

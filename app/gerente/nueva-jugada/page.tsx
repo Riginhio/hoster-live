@@ -24,7 +24,7 @@ import {
   saveLastGameConfigByType,
 } from "@/lib/sessions/lastGameConfigStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
-import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
+import { closeRealtimeSession, createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { DeckId } from "@/lib/decks";
 import { getActiveBoardBatchByDeck } from "@/lib/boards/boardBatchStorage";
 import { preloadDeckImages } from "@/lib/decks/preloadImages";
@@ -36,6 +36,49 @@ const modeLabels: Record<WinMode, string> = {
   full_card: "Llena",
 };
 const specialModeOptions: WinMode[] = ["four_corners", "center_four", "x_shape", "full_card"];
+const supabaseSyncTimeoutMs = 5000;
+
+type RealtimeCreateResult = Awaited<ReturnType<typeof createRealtimeSession>>;
+
+function navigateToActiveGame(router: ReturnType<typeof useRouter>) {
+  router.push("/gerente/jugada-activa");
+  window.setTimeout(() => {
+    if (window.location.pathname !== "/gerente/jugada-activa") {
+      window.location.href = "/gerente/jugada-activa";
+    }
+  }, 700);
+}
+
+function createRealtimeSessionWithTimeout(
+  session: Parameters<typeof createRealtimeSession>[0],
+): Promise<RealtimeCreateResult> {
+  let timedOut = false;
+  const realtimePromise = createRealtimeSession(session).catch(
+    (error): RealtimeCreateResult => ({
+      data: null,
+      error: error instanceof Error ? error : new Error("No se pudo sincronizar con Supabase."),
+      mode: "supabase",
+    }),
+  );
+  const timeoutPromise = new Promise<RealtimeCreateResult>((resolve) => {
+    window.setTimeout(() => {
+      timedOut = true;
+      resolve({
+        data: null,
+        error: new Error("Supabase tardo mas de 5 segundos. Reintenta iniciar la jugada."),
+        mode: "supabase",
+      });
+    }, supabaseSyncTimeoutMs);
+  });
+
+  void realtimePromise.then((result) => {
+    if (timedOut && result.data?.id) {
+      void closeRealtimeSession(result.data.id, { status: "cancelled" });
+    }
+  });
+
+  return Promise.race([realtimePromise, timeoutPromise]);
+}
 
 export default function NuevaJugadaPage() {
   const { currentUser } = useAuth();
@@ -247,6 +290,7 @@ export default function NuevaJugadaPage() {
 
     try {
       setIsPreparingGame(true);
+      setFormError("Creando sesion...");
       localStorage.setItem(configStorageKey, JSON.stringify(nextConfig));
       const createdSession = createSession({
         batchId: activeBatch.id,
@@ -274,6 +318,10 @@ export default function NuevaJugadaPage() {
         commissionNetAmount: financialBreakdown.commissionNetAmount,
         grossRevenue: financialBreakdown.grossRevenue,
         prizeAmount: financialBreakdown.prizeAmount,
+        basePrizeAmount: financialBreakdown.prizeAmount,
+        accumulatedContributionAmount: 0,
+        accumulatedPrizeAmount: 0,
+        gameType: "special",
         autoplayStatus: "idle",
         autoplayIntervalSeconds: Math.max(3, Math.round(selectedRestaurant.autoplayInterval / 1000)),
         preStartCountdownSeconds: 60,
@@ -294,12 +342,13 @@ export default function NuevaJugadaPage() {
         mode: nextConfig.mode,
         createdAt: nextConfig.createdAt ?? new Date().toISOString(),
       });
-      const realtimeResult = await createRealtimeSession(createdSession);
+      setFormError("Sincronizando con Supabase...");
+      const realtimeResult = await createRealtimeSessionWithTimeout(createdSession);
 
       if (realtimeResult.mode !== "supabase") {
         cancelSession(createdSession.id);
         setIsPreparingGame(false);
-        setFormError("Supabase no esta configurado. La TV no puede sincronizar entre dispositivos.");
+        setFormError("Error: Supabase no esta configurado. La TV no puede sincronizar entre dispositivos.");
         return;
       }
 
@@ -307,22 +356,22 @@ export default function NuevaJugadaPage() {
         cancelSession(createdSession.id);
         setIsPreparingGame(false);
         setFormError(
-          `No se pudo publicar la jugada en Supabase para TV: ${
+          `Error: ${
             realtimeResult.error?.message ?? "sin respuesta"
           }`,
         );
         return;
       }
 
-      setFormError(null);
+      setFormError("Sesion creada");
       setConfig(nextConfig);
       setSavedConfig(nextConfig);
-      router.push("/gerente/jugada-activa");
+      navigateToActiveGame(router);
       void preloadDeckImages(selectedDeckId, "especial-start");
       return;
-    } catch {
-      // La experiencia local puede seguir funcionando aunque el navegador bloquee almacenamiento.
+    } catch (error) {
       setIsPreparingGame(false);
+      setFormError(`Error: ${error instanceof Error ? error.message : "No se pudo iniciar la jugada."}`);
     }
   }
 

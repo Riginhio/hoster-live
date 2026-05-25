@@ -34,6 +34,11 @@ create table if not exists public.restaurants (
   hl_commission_mode text not null default 'fixed',
   hl_commission_value numeric not null default 0,
   hl_fixed_fee numeric not null default 0,
+  accumulated_enabled boolean not null default false,
+  accumulated_amount_per_game numeric not null default 0,
+  accumulated_day text not null default 'lunes',
+  accumulated_table_price numeric not null default 300,
+  accumulated_table_count int not null default 30,
   active_deck text not null default 'loteria',
   commission_percent numeric not null default 0,
   commission_hl_percent numeric not null default 0,
@@ -114,6 +119,10 @@ create table if not exists public.game_sessions (
   commission_restaurant_amount numeric not null default 0,
   commission_net_amount numeric not null default 0,
   prize_amount numeric not null default 0,
+  base_prize_amount numeric not null default 0,
+  accumulated_contribution_amount numeric not null default 0,
+  accumulated_prize_amount numeric not null default 0,
+  game_type text not null default 'normal',
   called_cards jsonb not null default '[]'::jsonb,
   winner_folio text,
   winner_cards jsonb not null default '[]'::jsonb,
@@ -138,6 +147,19 @@ create index if not exists game_sessions_restaurant_active_idx
 
 create index if not exists game_sessions_last_updated_idx
   on public.game_sessions (last_updated_at desc);
+
+alter table public.restaurants
+  add column if not exists accumulated_enabled boolean not null default false,
+  add column if not exists accumulated_amount_per_game numeric not null default 0,
+  add column if not exists accumulated_day text not null default 'lunes',
+  add column if not exists accumulated_table_price numeric not null default 300,
+  add column if not exists accumulated_table_count int not null default 30;
+
+alter table public.game_sessions
+  add column if not exists base_prize_amount numeric not null default 0,
+  add column if not exists accumulated_contribution_amount numeric not null default 0,
+  add column if not exists accumulated_prize_amount numeric not null default 0,
+  add column if not exists game_type text not null default 'normal';
 
 alter table public.restaurants enable row level security;
 alter table public.manager_users enable row level security;

@@ -39,6 +39,11 @@ export type RestaurantConfig = {
   hlCommissionMode: "fixed" | "percent";
   hlCommissionValue: number;
   hlFixedFee: number;
+  accumulatedEnabled: boolean;
+  accumulatedAmountPerGame: number;
+  accumulatedDay: "lunes" | "martes" | "miercoles" | "jueves" | "viernes" | "sabado" | "domingo";
+  accumulatedTablePrice: number;
+  accumulatedTableCount: number;
   activeDeck: DeckId;
   commissionPercent: number;
   commissionHLPercent: number;

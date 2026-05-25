@@ -32,6 +32,10 @@ export type RealtimeGameSession = {
   commission_restaurant_amount: number;
   commission_net_amount: number;
   prize_amount: number;
+  base_prize_amount: number | null;
+  accumulated_contribution_amount: number | null;
+  accumulated_prize_amount: number | null;
+  game_type: string | null;
   called_cards: string[];
   winner_folio: string | null;
   winner_cards: string[];
@@ -132,6 +136,10 @@ function toRealtimePayload(session: Session) {
     commission_restaurant_amount: session.commissionRestaurantAmount,
     commission_net_amount: session.commissionNetAmount,
     prize_amount: session.prizeAmount,
+    base_prize_amount: session.basePrizeAmount ?? session.prizeAmount,
+    accumulated_contribution_amount: session.accumulatedContributionAmount ?? 0,
+    accumulated_prize_amount: session.accumulatedPrizeAmount ?? 0,
+    game_type: session.gameType ?? "normal",
     called_cards: session.calledCards,
     winner_folio: session.winnerFolio ?? null,
     winner_cards: session.winnerCards,
@@ -220,6 +228,10 @@ export function realtimeSessionToSession(row: RealtimeGameSession): Session {
     commissionNetAmount: row.commission_net_amount,
     grossRevenue: row.gross_revenue,
     prizeAmount: row.prize_amount,
+    basePrizeAmount: row.base_prize_amount ?? row.prize_amount,
+    accumulatedContributionAmount: row.accumulated_contribution_amount ?? 0,
+    accumulatedPrizeAmount: row.accumulated_prize_amount ?? 0,
+    gameType: (row.game_type as Session["gameType"]) ?? "normal",
     calledCards: row.called_cards ?? [],
     winnerFolio: row.winner_folio ?? undefined,
     winnerCards: row.winner_cards ?? [],

@@ -52,6 +52,11 @@ function restaurantPayload(restaurant: RestaurantConfig) {
     hl_commission_mode: restaurant.hlCommissionMode,
     hl_commission_value: restaurant.hlCommissionValue,
     hl_fixed_fee: restaurant.hlFixedFee,
+    accumulated_enabled: restaurant.accumulatedEnabled,
+    accumulated_amount_per_game: restaurant.accumulatedAmountPerGame,
+    accumulated_day: restaurant.accumulatedDay,
+    accumulated_table_price: restaurant.accumulatedTablePrice,
+    accumulated_table_count: restaurant.accumulatedTableCount,
     active_deck: normalizeDeckId(restaurant.activeDeck),
     commission_percent: restaurant.commissionPercent,
     commission_hl_percent: restaurant.commissionHLPercent,
@@ -138,6 +143,10 @@ function sessionPayload(session: Session) {
     commission_net_amount: session.commissionNetAmount,
     gross_revenue: session.grossRevenue,
     prize_amount: session.prizeAmount,
+    base_prize_amount: session.basePrizeAmount ?? session.prizeAmount,
+    accumulated_contribution_amount: session.accumulatedContributionAmount ?? 0,
+    accumulated_prize_amount: session.accumulatedPrizeAmount ?? 0,
+    game_type: session.gameType ?? "normal",
     called_cards: session.calledCards,
     winner_folio: session.winnerFolio ?? null,
     winner_cards: session.winnerCards,
@@ -209,4 +218,3 @@ export async function upsertSessionToSupabase(session: Session) {
 
   return { data: data as Session | null, error: error ? toError(error) : null, mode: "supabase" as const };
 }
-

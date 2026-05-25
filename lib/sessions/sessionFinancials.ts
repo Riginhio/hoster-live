@@ -54,6 +54,30 @@ export function getSessionPrizeAmount(session: Session) {
   );
 }
 
+export function getSessionBasePrizeAmount(session: Session) {
+  if (!countsAsSale(session)) {
+    return 0;
+  }
+
+  return session.basePrizeAmount ?? session.prizeAmount ?? 0;
+}
+
+export function getSessionAccumulatedContributionAmount(session: Session) {
+  if (session.status !== "completed" || session.gameType !== "normal") {
+    return 0;
+  }
+
+  return session.accumulatedContributionAmount ?? 0;
+}
+
+export function getSessionAccumulatedPrizeAmount(session: Session) {
+  if (session.status !== "completed" || session.gameType !== "accumulated_special") {
+    return 0;
+  }
+
+  return session.accumulatedPrizeAmount ?? 0;
+}
+
 export function getSessionRestaurantNetAmount(session: Session) {
   if (!countsAsSale(session)) {
     return 0;

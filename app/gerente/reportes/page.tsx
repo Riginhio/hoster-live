@@ -8,6 +8,9 @@ import { getSessions, type Session } from "@/lib/sessions/sessionStorage";
 import { decks } from "@/lib/decks";
 import {
   getSessionGrossRevenue,
+  getSessionAccumulatedContributionAmount,
+  getSessionAccumulatedPrizeAmount,
+  getSessionBasePrizeAmount,
   getSessionHlFixedFee,
   getSessionPrizeAmount,
   getSessionRestaurantNetAmount,
@@ -30,6 +33,14 @@ function modeLabel(mode: string) {
 }
 
 function getGameType(session: Session) {
+  if (session.gameType === "accumulated_special") {
+    return "Acumulado";
+  }
+
+  if (session.gameType === "special") {
+    return "Especial";
+  }
+
   return session.activeTables > 50 ? "Especial" : "Normal";
 }
 
@@ -62,6 +73,10 @@ export default function GerenteReportesPage() {
           restaurantNetAmount:
             accumulator.restaurantNetAmount + getSessionRestaurantNetAmount(session),
           hlAmount: accumulator.hlAmount + getSessionHlFixedFee(session),
+          accumulatedGenerated:
+            accumulator.accumulatedGenerated + getSessionAccumulatedContributionAmount(session),
+          accumulatedAdded:
+            accumulator.accumulatedAdded + getSessionAccumulatedPrizeAmount(session),
         }),
         {
           games: 0,
@@ -72,6 +87,8 @@ export default function GerenteReportesPage() {
           prizeAmount: 0,
           restaurantNetAmount: 0,
           hlAmount: 0,
+          accumulatedGenerated: 0,
+          accumulatedAdded: 0,
         },
       ),
     [restaurantSessions],
@@ -127,6 +144,18 @@ export default function GerenteReportesPage() {
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/45">HL</p>
               <p className="mt-2 text-3xl font-black text-bone">{formatCurrency(totals.hlAmount)}</p>
             </Card>
+            <Card>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/45">Acumulado generado</p>
+              <p className="mt-2 text-3xl font-black text-bone">
+                {formatCurrency(totals.accumulatedGenerated)}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/45">Acumulado agregado</p>
+              <p className="mt-2 text-3xl font-black text-bone">
+                {formatCurrency(totals.accumulatedAdded)}
+              </p>
+            </Card>
           </div>
 
           <Card className="mt-6 overflow-hidden p-0">
@@ -134,7 +163,7 @@ export default function GerenteReportesPage() {
               <h2 className="font-display text-3xl text-bone">Desglose de jugadas</h2>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1080px] border-collapse">
+              <table className="w-full min-w-[1320px] border-collapse">
                 <thead className="bg-bone/[0.035] text-left text-xs uppercase tracking-[0.14em] text-bone/45">
                   <tr>
                     <th className="px-5 py-4">Timestamp</th>
@@ -145,6 +174,9 @@ export default function GerenteReportesPage() {
                     <th className="px-5 py-4">Costo</th>
                     <th className="px-5 py-4">Operador</th>
                     <th className="px-5 py-4">Total individual</th>
+                    <th className="px-5 py-4">Premio base</th>
+                    <th className="px-5 py-4">Acum. desc/agregado</th>
+                    <th className="px-5 py-4">Premio total</th>
                     <th className="px-5 py-4">Estatus</th>
                   </tr>
                 </thead>
@@ -166,6 +198,17 @@ export default function GerenteReportesPage() {
                       </td>
                       <td className="px-5 py-4 font-semibold text-mezcal">
                         {formatCurrency(getSessionGrossRevenue(session))}
+                      </td>
+                      <td className="px-5 py-4 text-bone/62">
+                        {formatCurrency(getSessionBasePrizeAmount(session))}
+                      </td>
+                      <td className="px-5 py-4 text-bone/62">
+                        {session.gameType === "accumulated_special"
+                          ? `+${formatCurrency(getSessionAccumulatedPrizeAmount(session))}`
+                          : `-${formatCurrency(getSessionAccumulatedContributionAmount(session))}`}
+                      </td>
+                      <td className="px-5 py-4 font-semibold text-mezcal">
+                        {formatCurrency(getSessionPrizeAmount(session))}
                       </td>
                       <td className="px-5 py-4 text-bone/62">{session.status}</td>
                     </tr>

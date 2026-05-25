@@ -166,6 +166,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const restaurantSecondary = restaurant.secondaryColor || restaurant.theme.secondaryColor;
   const restaurantAccent = restaurant.accentColor || "#d9a441";
   const currentCard = calledCards[calledCards.length - 1] ?? null;
+  const isAccumulatedGame = activeSession?.gameType === "accumulated_special";
   const activePromotions = activeSession?.activePromotions ?? [];
   const deckSize = getDeckCards(activeSession?.deckId ?? restaurant.activeDeck).length;
   const standbyTitle = restaurant.standbyTitle || "HOSTER LIVE";
@@ -645,7 +646,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             </div>
 
             <p className="text-sm font-black uppercase tracking-[0.36em] text-mezcal">
-              Nueva jugada por comenzar
+              {isAccumulatedGame ? "ACUMULADO" : "Nueva jugada por comenzar"}
             </p>
             <h1 className="mt-4 font-display text-[6rem] leading-none text-bone md:text-[11rem]">
               {formatCountdown(countdownRemaining)}
@@ -657,6 +658,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               <StatusTile label="Tablas" value={String(config.activeTables)} color={restaurantSecondary} />
               <StatusTile label="Premio" value={`$${config.calculatedPrize}`} />
             </div>
+            {isAccumulatedGame ? (
+              <div className="mx-auto mt-5 w-fit rounded-lg border border-mezcal/45 bg-mezcal/15 px-6 py-4 shadow-glow">
+                <p className="text-xs font-black uppercase tracking-[0.28em] text-mezcal">
+                  Premio acumulado total
+                </p>
+                <p className="mt-1 font-display text-5xl text-bone">
+                  ${config.calculatedPrize}
+                </p>
+              </div>
+            ) : null}
 
             <p className="mt-9 text-xs font-black uppercase tracking-[0.3em] text-agave">
               Promos activas durante esta jugada
@@ -750,7 +761,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               </div>
 
               <p className="text-xs font-black uppercase tracking-[0.34em] text-mezcal">
-                Proxima jugada por comenzar
+                {isAccumulatedGame ? "ACUMULADO" : "Proxima jugada por comenzar"}
               </p>
               <h1 className="mt-4 max-w-5xl font-display text-6xl leading-none text-bone md:text-8xl">
                 {standbyTitle}
@@ -1004,6 +1015,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                   {restaurant.name}
                 </p>
                 <h1 className="font-display text-3xl text-bone md:text-5xl">HOSTER LIVE</h1>
+                {isAccumulatedGame ? (
+                  <span className="mt-2 inline-flex rounded-full border border-mezcal/40 bg-mezcal/15 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+                    ACUMULADO
+                  </span>
+                ) : null}
               </div>
             </div>
             {activeSession ? (
