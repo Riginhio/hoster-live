@@ -75,6 +75,10 @@ type RealtimeResult<T> = {
   mode: "local" | "supabase";
 };
 
+const activeSessionStatuses = ["created", "countdown", "active", "playing"];
+const terminalSessionStatuses = ["completed", "cancelled", "closed_without_winner"];
+const activeAutoplayStatuses = ["idle", "countdown", "playing", "paused", "winner"];
+
 export type RealtimeSessionUpdate = Partial<
   Pick<
     Session,
@@ -258,6 +262,7 @@ function toChannelState(status: string): RestaurantSessionChannelState {
 export async function createRealtimeSession(session: Session): Promise<RealtimeResult<RealtimeGameSession>> {
   const supabase = getSupabaseClient();
   const restaurantId = normalizeRestaurantSlug(session.restaurantId);
+  const now = new Date().toISOString();
 
   if (!supabase) {
     return localResult();
@@ -268,35 +273,45 @@ export async function createRealtimeSession(session: Session): Promise<RealtimeR
     .update({
       status: "closed_without_winner",
       autoplay_status: "finished",
-      play_ended_at: new Date().toISOString(),
-      last_updated_at: new Date().toISOString(),
+      play_ended_at: now,
+      last_updated_at: now,
     })
     .eq("restaurant_id", restaurantId)
-    .eq("status", "active");
+    .in("status", activeSessionStatuses);
 
   const { data, error } = await supabase
     .from("game_sessions")
-    .insert(toRealtimePayload(session))
+    .upsert(
+      {
+        ...toRealtimePayload(session),
+        restaurant_id: restaurantId,
+        status: session.status || "active",
+        last_updated_at: session.lastUpdatedAt || now,
+      },
+      { onConflict: "id" },
+    )
     .select()
     .single();
 
   const realtimeSession = data as RealtimeGameSession | null;
 
-  if (process.env.NODE_ENV === "development") {
-    if (error) {
-      console.warn("[HOSTER LIVE] INSERT REALTIME SESSION ERROR", {
-        message: error.message,
-        details: error.details,
-        code: error.code,
-        sessionId: session.id,
-        restaurant_id: restaurantId,
-      });
-    } else {
-      console.info("[HOSTER LIVE] INSERT REALTIME SESSION OK", {
-        sessionId: realtimeSession?.id,
-        restaurant_id: realtimeSession?.restaurant_id,
-      });
-    }
+  if (error) {
+    console.warn("[HOSTER LIVE] UPSERT REALTIME SESSION ERROR", {
+      message: error.message,
+      details: error.details,
+      code: error.code,
+      sessionId: session.id,
+      restaurant_id: restaurantId,
+      status: session.status,
+      autoplay_status: session.autoplayStatus,
+    });
+  } else {
+    console.info("[HOSTER LIVE] UPSERT REALTIME SESSION OK", {
+      sessionId: realtimeSession?.id,
+      restaurant_id: realtimeSession?.restaurant_id,
+      status: realtimeSession?.status,
+      autoplay_status: realtimeSession?.autoplay_status,
+    });
   }
 
   return { data: realtimeSession, error, mode: "supabase" };
@@ -340,28 +355,44 @@ export async function getActiveRealtimeSessionByRestaurantId(
     .from("game_sessions")
     .select("*")
     .eq("restaurant_id", slug)
-    .in("status", ["active", "completed", "cancelled", "closed_without_winner"])
     .order("last_updated_at", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
+  const rows = (data as RealtimeGameSession[] | null) ?? [];
+  const activeRow =
+    rows.find((row) => {
+      const status = String(row.status ?? "");
+      const autoplayStatus = String(row.autoplay_status ?? "");
+
+      return (
+        !terminalSessionStatuses.includes(status) &&
+        (activeSessionStatuses.includes(status) || activeAutoplayStatuses.includes(autoplayStatus))
+      );
+    }) ?? null;
 
   if (process.env.NODE_ENV === "development") {
-    if (data) {
+    if (activeRow) {
       console.info("[HOSTER LIVE] SESSION FOUND realtime:", {
-        id: data.id,
-        restaurant_id: data.restaurant_id,
-        autoplay_status: data.autoplay_status,
+        id: activeRow.id,
+        restaurant_id: activeRow.restaurant_id,
+        status: activeRow.status,
+        autoplay_status: activeRow.autoplay_status,
       });
     } else {
       console.info("[HOSTER LIVE] SESSION NOT FOUND realtime:", {
         restaurant_id: slug,
         error: error?.message,
+        latestRows: rows.map((row) => ({
+          id: row.id,
+          status: row.status,
+          autoplay_status: row.autoplay_status,
+          last_updated_at: row.last_updated_at,
+        })),
       });
     }
   }
 
-  return { data: data as RealtimeGameSession | null, error, mode: "supabase" };
+  return { data: activeRow, error, mode: "supabase" };
 }
 
 export async function getLatestRealtimeSessionDebugByRestaurantId(

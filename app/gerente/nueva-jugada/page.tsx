@@ -18,7 +18,7 @@ import {
 import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
 import type { RestaurantConfig } from "@/lib/types";
 import { calculateFinancialBreakdown } from "@/lib/finance";
-import { createSession } from "@/lib/sessions/sessionStorage";
+import { cancelSession, createSession } from "@/lib/sessions/sessionStorage";
 import {
   saveLastGameConfig,
   saveLastGameConfigByType,
@@ -213,7 +213,7 @@ export default function NuevaJugadaPage() {
     });
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (isPlay) {
@@ -294,11 +294,30 @@ export default function NuevaJugadaPage() {
         mode: nextConfig.mode,
         createdAt: nextConfig.createdAt ?? new Date().toISOString(),
       });
+      const realtimeResult = await createRealtimeSession(createdSession);
+
+      if (realtimeResult.mode !== "supabase") {
+        cancelSession(createdSession.id);
+        setIsPreparingGame(false);
+        setFormError("Supabase no esta configurado. La TV no puede sincronizar entre dispositivos.");
+        return;
+      }
+
+      if (realtimeResult.error || !realtimeResult.data) {
+        cancelSession(createdSession.id);
+        setIsPreparingGame(false);
+        setFormError(
+          `No se pudo publicar la jugada en Supabase para TV: ${
+            realtimeResult.error?.message ?? "sin respuesta"
+          }`,
+        );
+        return;
+      }
+
       setFormError(null);
       setConfig(nextConfig);
       setSavedConfig(nextConfig);
       router.push("/gerente/jugada-activa");
-      void createRealtimeSession(createdSession);
       void preloadDeckImages(selectedDeckId, "especial-start");
       return;
     } catch {

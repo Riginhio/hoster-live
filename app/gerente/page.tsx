@@ -24,7 +24,7 @@ import {
   saveLastGameConfigByType,
   type LastGameConfig,
 } from "@/lib/sessions/lastGameConfigStorage";
-import { createSession } from "@/lib/sessions/sessionStorage";
+import { cancelSession, createSession } from "@/lib/sessions/sessionStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
 import { createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { RestaurantConfig } from "@/lib/types";
@@ -183,7 +183,7 @@ export default function GerentePage() {
     setDraftGame(nextDraft);
   }
 
-  function startQuickGame() {
+  async function startQuickGame() {
     if (!restaurant || !activeBatch || !draftGame || !financialBreakdown) {
       return;
     }
@@ -252,10 +252,29 @@ export default function GerentePage() {
       },
     );
 
+    const realtimeResult = await createRealtimeSession(createdSession);
+
+    if (realtimeResult.mode !== "supabase") {
+      cancelSession(createdSession.id);
+      setIsStartingGame(false);
+      setFeedback("Supabase no esta configurado. La TV no puede sincronizar entre dispositivos.");
+      return;
+    }
+
+    if (realtimeResult.error || !realtimeResult.data) {
+      cancelSession(createdSession.id);
+      setIsStartingGame(false);
+      setFeedback(
+        `No se pudo publicar la jugada en Supabase para TV: ${
+          realtimeResult.error?.message ?? "sin respuesta"
+        }`,
+      );
+      return;
+    }
+
     setLastConfig(savedConfig);
     setDraftGame(null);
     router.push("/gerente/jugada-activa");
-    void createRealtimeSession(createdSession);
     void preloadDeckImages(draftGame.deckId, "gerente-start");
   }
 

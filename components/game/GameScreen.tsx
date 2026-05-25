@@ -199,6 +199,15 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       channelStatus,
     });
     setLastEventReceived(`reconexion manual ${new Date().toLocaleTimeString("es-MX")}`);
+    lastSyncSignatureRef.current = "";
+    previousCalledCountRef.current = 0;
+    previousWinnerFolioRef.current = undefined;
+    setActiveSession(null);
+    setRealtimeSession(null);
+    setCalledCards([]);
+    setWinner(null);
+    setLatestRealtimeDebugRow(null);
+    setLastRealtimeSessionFound(false);
     setRealtimeStatus(supabaseStatus.connected ? "supabase-polling" : "fallback");
     setReconnectNonce((current) => current + 1);
   }
@@ -1327,6 +1336,8 @@ function RealtimeDebugPanel({
         <dd className="text-bone">{latestRow?.autoplay_status ?? "-"}</dd>
         <dt>Row status</dt>
         <dd className="text-bone">{latestRow?.status ?? "-"}</dd>
+        <dt>Row updated_at</dt>
+        <dd className="max-w-36 truncate text-bone">{latestRow?.last_updated_at ?? "-"}</dd>
       </dl>
       {error ? (
         <p className="mt-2 rounded border border-chile/25 bg-chile/10 p-2 text-[#ff9b91]">
