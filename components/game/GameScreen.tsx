@@ -42,10 +42,12 @@ import {
   subscribeToRestaurantSession,
   type RestaurantSessionChannelStatus,
   type RealtimeSessionDebugRow,
+  updateRealtimeSession,
 } from "@/lib/supabase/sessionRealtime";
 import { getDeckCards } from "@/lib/decks";
 import { getTvControl, type TvControl } from "@/lib/tv/tvControlStorage";
 import { preloadDeckImages, resetDeckPreloadCache } from "@/lib/decks/preloadImages";
+import { reconcileSessionByClock, sessionRuntimeChanged } from "@/lib/sessions/sessionRuntime";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -298,7 +300,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           const previousSessionId = activeSession?.id;
           const syncSignature = getSessionSyncSignature(storedSession);
 
-          if (lastSyncSignatureRef.current === syncSignature) {
+          if (
+            lastSyncSignatureRef.current === syncSignature &&
+            storedSession.autoplayStatus !== "playing" &&
+            storedSession.autoplayStatus !== "countdown"
+          ) {
             return;
           }
 
@@ -308,8 +314,23 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             ? getBoardBatches().find((batch) => batch.id === storedSession.batchId)
             : getActiveBoardBatch(tvRestaurantId);
           const nextBoards = sessionBatch ? toLoteriaBoards(sessionBatch.boards) : [];
-          const nextCalledCards = hydrateSessionCards(storedSession.calledCards, storedSession.deckId);
-          const isCountdownSession = storedSession.autoplayStatus === "countdown";
+          const reconciledSession = reconcileSessionByClock(storedSession, nextBoards);
+          const nextCalledCards = hydrateSessionCards(reconciledSession.calledCards, reconciledSession.deckId);
+          const isCountdownSession = reconciledSession.autoplayStatus === "countdown";
+
+          if (sessionRuntimeChanged(storedSession, reconciledSession)) {
+            void updateRealtimeSession(reconciledSession.id, {
+              autoplayStatus: reconciledSession.autoplayStatus,
+              calledCards: reconciledSession.calledCards,
+              winnerFolio: reconciledSession.winnerFolio,
+              winnerCards: reconciledSession.winnerCards,
+              autoplayStartedAt: reconciledSession.autoplayStartedAt,
+              playStartedAt: reconciledSession.playStartedAt,
+              playEndedAt: reconciledSession.playEndedAt,
+              durationSeconds: reconciledSession.durationSeconds,
+              lastUpdatedAt: reconciledSession.lastUpdatedAt,
+            });
+          }
 
           if (sessionIdChanged) {
             setCalledCards([]);
@@ -319,54 +340,54 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             previousWinnerFolioRef.current = undefined;
           }
 
-          setActiveSession(storedSession);
+          setActiveSession(reconciledSession);
           setConfig({
-            restaurantId: storedSession.restaurantId,
-            activeTables: storedSession.activeTables,
-            mode: storedSession.mode,
-            tablePrice: storedSession.tablePrice,
-            commissionPercent: storedSession.commissionPercent,
-            restaurantCommissionPercent: storedSession.restaurantCommissionPercent,
-            hlCommissionMode: storedSession.hlCommissionMode,
-            hlCommissionValue: storedSession.hlCommissionValue,
-            hlFixedFee: storedSession.hlFixedFee,
-            calculatedPrize: storedSession.prizeAmount,
-            createdAt: storedSession.createdAt,
+            restaurantId: reconciledSession.restaurantId,
+            activeTables: reconciledSession.activeTables,
+            mode: reconciledSession.mode,
+            tablePrice: reconciledSession.tablePrice,
+            commissionPercent: reconciledSession.commissionPercent,
+            restaurantCommissionPercent: reconciledSession.restaurantCommissionPercent,
+            hlCommissionMode: reconciledSession.hlCommissionMode,
+            hlCommissionValue: reconciledSession.hlCommissionValue,
+            hlFixedFee: reconciledSession.hlFixedFee,
+            calculatedPrize: reconciledSession.prizeAmount,
+            createdAt: reconciledSession.createdAt,
           });
-          if (storedSession.calledCards.length > previousCalledCountRef.current) {
-            const timingLabel = `[HL timing] TV recepcion ${storedSession.calledCards.at(-1)}`;
+          if (reconciledSession.calledCards.length > previousCalledCountRef.current) {
+            const timingLabel = `[HL timing] TV recepcion ${reconciledSession.calledCards.at(-1)}`;
             console.time(timingLabel);
             console.timeEnd(timingLabel);
           }
           setCalledCards(isCountdownSession ? [] : nextCalledCards);
 
           if (!isCountdownSession && !sessionIdChanged) {
-            if (storedSession.calledCards.length > previousCalledCountRef.current) {
+            if (reconciledSession.calledCards.length > previousCalledCountRef.current) {
               playGameTone("card", audioEnabled);
             }
 
-            if (storedSession.winnerFolio && storedSession.winnerFolio !== previousWinnerFolioRef.current) {
+            if (reconciledSession.winnerFolio && reconciledSession.winnerFolio !== previousWinnerFolioRef.current) {
               playGameTone("winner", audioEnabled);
             }
           }
 
-          previousCalledCountRef.current = isCountdownSession ? 0 : storedSession.calledCards.length;
-          previousWinnerFolioRef.current = storedSession.winnerFolio;
+          previousCalledCountRef.current = isCountdownSession ? 0 : reconciledSession.calledCards.length;
+          previousWinnerFolioRef.current = reconciledSession.winnerFolio;
 
           if (
             !isCountdownSession &&
-            storedSession.winnerFolio &&
-            storedSession.winnerCards.length > 0
+            reconciledSession.winnerFolio &&
+            reconciledSession.winnerCards.length > 0
           ) {
             const winningBoard = nextBoards.find(
-              (board) => board.folio === storedSession.winnerFolio,
+              (board) => board.folio === reconciledSession.winnerFolio,
             );
 
             setWinner(
               winningBoard
                 ? {
                     board: winningBoard,
-                    winningCards: hydrateSessionCards(storedSession.winnerCards, storedSession.deckId),
+                    winningCards: hydrateSessionCards(reconciledSession.winnerCards, reconciledSession.deckId),
                   }
                 : null,
             );

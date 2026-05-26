@@ -60,6 +60,7 @@ import {
 } from "@/lib/supabase/sessionRealtime";
 import { preloadDeckImages, resetDeckPreloadCache } from "@/lib/decks/preloadImages";
 import { decks } from "@/lib/decks";
+import { reconcileSessionByClock, sessionRuntimeChanged } from "@/lib/sessions/sessionRuntime";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -288,10 +289,29 @@ export default function JugadaActivaPage() {
       getActiveSession(restaurantId) ??
       (session?.id ? getSessionById(session.id) : undefined) ??
       null;
-    const normalizedSession = chooseNewestSession(remoteSession, activeSession ?? latestLocalSession);
+    const selectedSession = chooseNewestSession(remoteSession, activeSession ?? latestLocalSession);
+    const selectedBatch = selectedSession ? getBatchForSession(selectedSession) : null;
+    const selectedBoards = selectedBatch ? toLoteriaBoards(selectedBatch.boards).slice(0, selectedSession?.activeTables ?? 0) : [];
+    const normalizedSession = selectedSession
+      ? reconcileSessionByClock(selectedSession, selectedBoards)
+      : null;
+
+    if (selectedSession && normalizedSession && sessionRuntimeChanged(selectedSession, normalizedSession)) {
+      updateSession(normalizedSession.id, normalizedSession, { syncSupabase: false });
+      void syncRealtimeFromSession(normalizedSession, {
+        autoplayStatus: normalizedSession.autoplayStatus,
+        calledCards: normalizedSession.calledCards,
+        winnerFolio: normalizedSession.winnerFolio,
+        winnerCards: normalizedSession.winnerCards,
+        autoplayStartedAt: normalizedSession.autoplayStartedAt,
+        playStartedAt: normalizedSession.playStartedAt,
+        playEndedAt: normalizedSession.playEndedAt,
+        durationSeconds: normalizedSession.durationSeconds,
+      });
+    }
 
     setSession(normalizedSession);
-    setActiveBatch(normalizedSession ? getBatchForSession(normalizedSession) : null);
+    setActiveBatch(normalizedSession ? selectedBatch : null);
     setCalledCards(
       normalizedSession ? hydrateSessionCards(normalizedSession.calledCards, normalizedSession.deckId) : [],
     );

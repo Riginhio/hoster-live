@@ -50,7 +50,7 @@ export type RealtimeGameSession = {
   active_promotions: Session["activePromotions"];
   operator_user_id: string | null;
   operator_username: string | null;
-  operator_role: "restaurant_admin" | "manager" | "play" | "supervisor" | "tv" | null;
+  operator_role: "restaurant_admin" | "manager" | "play" | "super_admin" | "supervisor" | "tv" | null;
   duration_seconds: number;
   last_updated_at: string;
   created_at: string;
@@ -253,7 +253,7 @@ export function realtimeSessionToSession(row: RealtimeGameSession): Session {
     activePromotions: row.active_promotions ?? [],
     operatorUserId: row.operator_user_id ?? undefined,
     operatorUsername: row.operator_username ?? undefined,
-    operatorRole: row.operator_role ?? undefined,
+    operatorRole: row.operator_role === "supervisor" ? "super_admin" : row.operator_role ?? undefined,
     status: row.status as Session["status"],
     durationSeconds: row.duration_seconds ?? 0,
   };

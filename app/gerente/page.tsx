@@ -44,7 +44,7 @@ const modeLabels: Record<WinMode, string> = {
   full_card: "Llena",
 };
 const normalModeOptions: WinMode[] = ["four_corners", "center_four", "x_shape", "full_card"];
-const supabaseSyncTimeoutMs = 5000;
+const supabaseSyncTimeoutMs = 12000;
 
 type RealtimeCreateResult = Awaited<ReturnType<typeof createRealtimeSession>>;
 
@@ -112,7 +112,7 @@ function createRealtimeSessionWithTimeout(
       timedOut = true;
       resolve({
         data: null,
-        error: new Error("Supabase tardo mas de 5 segundos. Reintenta iniciar la jugada."),
+        error: new Error("Supabase tardo mas de 12 segundos. Reintenta iniciar la jugada."),
         mode: "supabase",
       });
     }, supabaseSyncTimeoutMs);

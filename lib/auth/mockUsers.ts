@@ -9,7 +9,7 @@ export type MockUser = {
   name: string;
   restaurantId?: string;
   restaurantName?: string;
-  venueRole?: "restaurant_admin" | "manager" | "play" | "supervisor" | "tv";
+  venueRole?: "restaurant_admin" | "manager" | "play" | "super_admin" | "tv";
   restaurantIds?: string[];
   brandName?: string;
   userId?: string;

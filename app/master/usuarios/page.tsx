@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { KeyRound, Pencil, Power, Plus, Trash2, X } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Pencil, Power, Plus, Trash2, X } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -33,11 +33,14 @@ export default function MasterUsuariosPage() {
   const [users, setUsers] = useState<ManagerUser[]>([]);
   const [formState, setFormState] = useState(initialFormState);
   const [error, setError] = useState("");
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   function refresh() {
     const activeRestaurants = getRestaurants().filter((restaurant) => restaurant.isActive);
     setRestaurants(activeRestaurants);
     setUsers(getManagerUsers());
+    setSelectedRestaurantId((current) => current || activeRestaurants[0]?.id || "");
   }
 
   useEffect(() => {
@@ -70,7 +73,7 @@ export default function MasterUsuariosPage() {
       name: formState.name.trim(),
       restaurantId: formState.restaurantId,
       restaurantIds:
-        formState.role === "supervisor" ? formState.restaurantIds : [formState.restaurantId],
+        formState.role === "super_admin" ? formState.restaurantIds : [formState.restaurantId],
       brandName: formState.brandName.trim(),
       id: formState.id || undefined,
       role: formState.role,
@@ -139,10 +142,10 @@ export default function MasterUsuariosPage() {
               <option value="restaurant_admin">Restaurant Admin</option>
               <option value="manager">Manager</option>
               <option value="play">Play</option>
-              <option value="supervisor">Supervisor / Grupo</option>
+              <option value="super_admin">Super admin</option>
               <option value="tv">TV</option>
             </select>
-            {formState.role === "supervisor" ? (
+            {formState.role === "super_admin" ? (
               <input
                 value={formState.brandName}
                 onChange={(event) => setFormState((current) => ({ ...current, brandName: event.target.value }))}
@@ -156,12 +159,23 @@ export default function MasterUsuariosPage() {
               className="h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
               placeholder="username"
             />
-            <input
-              value={formState.password}
-              onChange={(event) => setFormState((current) => ({ ...current, password: event.target.value }))}
-              className="h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
-              placeholder="password"
-            />
+            <div className="flex rounded-lg border border-bone/10 bg-bone/[0.045] focus-within:border-mezcal">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={formState.password}
+                onChange={(event) => setFormState((current) => ({ ...current, password: event.target.value }))}
+                className="h-11 min-w-0 flex-1 bg-transparent px-3 text-bone outline-none"
+                placeholder="password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((current) => !current)}
+                className="grid h-11 w-11 place-items-center text-bone/65 transition hover:text-bone"
+                title={showPassword ? "Ocultar password" : "Mostrar password"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <select
               value={formState.restaurantId}
               onChange={(event) => setFormState((current) => ({ ...current, restaurantId: event.target.value }))}
@@ -173,7 +187,7 @@ export default function MasterUsuariosPage() {
                 </option>
               ))}
             </select>
-            {formState.role === "supervisor" ? (
+            {formState.role === "super_admin" ? (
               <div className="grid gap-2 rounded-lg border border-bone/10 bg-obsidian/38 p-3">
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-bone/42">
                   Sucursales visibles
@@ -214,9 +228,26 @@ export default function MasterUsuariosPage() {
         <Card className="overflow-hidden p-0">
           <div className="border-b border-bone/10 px-5 py-4">
             <h2 className="font-display text-3xl text-bone">Usuarios por restaurante</h2>
+            <select
+              value={selectedRestaurantId}
+              onChange={(event) => setSelectedRestaurantId(event.target.value)}
+              className="mt-4 h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal md:max-w-sm"
+            >
+              {restaurants.map((restaurant) => (
+                <option key={restaurant.id} value={restaurant.id}>
+                  {restaurant.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="divide-y divide-bone/10">
-            {users.map((user) => {
+            {users
+              .filter((user) =>
+                selectedRestaurantId
+                  ? user.restaurantId === selectedRestaurantId || user.restaurantIds.includes(selectedRestaurantId)
+                  : true,
+              )
+              .map((user) => {
               const restaurant = restaurants.find((item) => item.id === user.restaurantId);
 
               return (
@@ -227,7 +258,7 @@ export default function MasterUsuariosPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mezcal">
                       {restaurant?.name ?? user.restaurantId} · {user.role}
                     </p>
-                    {user.role === "supervisor" ? (
+                    {user.role === "super_admin" ? (
                       <p className="mt-1 text-xs font-semibold text-bone/45">
                         {user.brandName || "Grupo sin nombre"} / {user.restaurantIds.length} sucursales
                       </p>
@@ -265,8 +296,12 @@ export default function MasterUsuariosPage() {
                 </div>
               );
             })}
-            {users.length === 0 ? (
-              <p className="px-5 py-8 text-sm text-bone/50">Aun no hay gerentes configurados.</p>
+            {users.filter((user) =>
+              selectedRestaurantId
+                ? user.restaurantId === selectedRestaurantId || user.restaurantIds.includes(selectedRestaurantId)
+                : true,
+            ).length === 0 ? (
+              <p className="px-5 py-8 text-sm text-bone/50">Aun no hay usuarios para este restaurante.</p>
             ) : null}
           </div>
         </Card>

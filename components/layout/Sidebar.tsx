@@ -26,7 +26,7 @@ type SidebarLink = {
   label: string;
   icon: typeof LayoutDashboard;
   roles: UserRole[];
-  venueRoles?: Array<"restaurant_admin" | "manager" | "play" | "supervisor" | "tv">;
+  venueRoles?: Array<"restaurant_admin" | "manager" | "play" | "super_admin" | "tv">;
 };
 
 const links: SidebarLink[] = [
@@ -40,12 +40,12 @@ const links: SidebarLink[] = [
   { href: "/master/tvs", label: "TVs", icon: MonitorPlay, roles: ["master"] },
   { href: "/master/cortes", label: "Cortes", icon: BarChart3, roles: ["master"] },
   { href: "/gerente", label: "Inicio", icon: Clapperboard, roles: ["gerente"] },
-  { href: "/gerente/nueva-jugada", label: "Jugada especial", icon: Sparkles, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager"] },
+  { href: "/gerente/nueva-jugada", label: "Jugada especial", icon: Sparkles, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager", "super_admin"] },
   { href: "/gerente/jugada-activa", label: "Jugada activa", icon: Radio, roles: ["gerente"] },
   { href: "/gerente/tablas", label: "Tablas", icon: Table2, roles: ["gerente"] },
-  { href: "/gerente/reportes", label: "Reportes", icon: BarChart3, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager", "supervisor"] },
-  { href: "/gerente/promociones", label: "Promociones", icon: QrCode, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager"] },
-  { href: "/gerente/usuarios", label: "Usuarios", icon: Users, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager", "supervisor"] },
+  { href: "/gerente/reportes", label: "Reportes", icon: BarChart3, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager", "super_admin"] },
+  { href: "/gerente/promociones", label: "Promociones", icon: QrCode, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager", "super_admin"] },
+  { href: "/gerente/usuarios", label: "Usuarios", icon: Users, roles: ["gerente"], venueRoles: ["restaurant_admin", "manager", "super_admin"] },
   { href: "/tv/rancho-viejo", label: "Pantalla TV", icon: MonitorPlay, roles: ["tv"] },
 ];
 

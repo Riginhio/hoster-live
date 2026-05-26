@@ -19,6 +19,7 @@ import {
 } from "@/lib/qr/qrCampaignStorage";
 import { decodeBoardValidationPayload, type BoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
+import { getActiveRealtimeSessionByRestaurantId } from "@/lib/supabase/sessionRealtime";
 import type { QrCampaign, RestaurantConfig } from "@/lib/types";
 
 type ValidateClientProps = {
@@ -63,6 +64,31 @@ function resolveValidation(payload: BoardValidationPayload | null, batches = get
   };
 }
 
+async function resolveActiveSessionBatch(payload: BoardValidationPayload | null) {
+  if (!payload) {
+    return null;
+  }
+
+  const result = await getActiveRealtimeSessionByRestaurantId(payload.restaurantId);
+
+  if (result.mode !== "supabase" || result.error || !result.data) {
+    return null;
+  }
+
+  return result.data.batch_id === payload.batchId ? result.data : null;
+}
+
+function isOperationalFolioInSession(payload: BoardValidationPayload | null, activeTables?: number) {
+  if (!payload || !activeTables) {
+    return false;
+  }
+
+  const match = /^HL-(\d+)$/i.exec(payload.folio.trim());
+  const folioNumber = match ? Number(match[1]) : Number.NaN;
+
+  return Number.isInteger(folioNumber) && folioNumber > 0 && folioNumber <= activeTables;
+}
+
 export function ValidateClient({ payload }: ValidateClientProps) {
   const decodedPayload = useMemo(() => decodeBoardValidationPayload(payload), [payload]);
   const [batch, setBatch] = useState<BoardBatch | null>(null);
@@ -79,15 +105,20 @@ export function ValidateClient({ payload }: ValidateClientProps) {
         refreshBoardBatchesFromSupabase(),
         refreshQrCampaignsFromSupabase(),
       ]);
+      const activeSession = await resolveActiveSessionBatch(decodedPayload);
 
       if (!isMounted) {
         return;
       }
 
       const validation = resolveValidation(decodedPayload, batchResult.batches);
+      const isActiveSessionBatch = Boolean(
+        activeSession &&
+        (validation.boardExists || isOperationalFolioInSession(decodedPayload, activeSession.active_tables)),
+      );
       setBatch(validation.batch);
-      setBoardExists(validation.boardExists);
-      setIsValid(validation.isValid);
+      setBoardExists(validation.boardExists || isActiveSessionBatch);
+      setIsValid(validation.isValid || isActiveSessionBatch);
       setCampaigns(
         decodedPayload ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId, "printed_qr") : [],
       );
@@ -103,7 +134,7 @@ export function ValidateClient({ payload }: ValidateClientProps) {
   const restaurantName =
     restaurant?.name ?? batch?.restaurantName ?? decodedPayload?.restaurantName ?? "No disponible";
   const batchName = batch?.name ?? decodedPayload?.batchName ?? "No disponible";
-  const statusText = isValid ? "Valida" : "Esta tabla ya no esta activa";
+  const statusText = isValid ? "Tabla activa" : "Esta tabla ya no esta activa";
 
   return (
     <main className="screen-safe cantina-grid bg-obsidian px-4 py-6">

@@ -708,9 +708,8 @@ export default function RestaurantesPage() {
     }
 
     refreshRestaurants();
-    if (editingRestaurant) {
-      closeForm();
-    }
+    setFormState(emptyForm);
+    closeForm();
   }
 
   function handleToggleRestaurant(restaurantId: string) {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, MonitorPlay, Save } from "lucide-react";
+import { Copy, ExternalLink, MonitorPlay, Save } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -24,6 +24,7 @@ export default function MasterTvsPage() {
   const [restaurants, setRestaurants] = useState<RestaurantConfig[]>([]);
   const [sessions, setSessions] = useState(getSessions);
   const [controls, setControls] = useState<TvControl[]>([]);
+  const [restaurantFilter, setRestaurantFilter] = useState("all");
   const supabaseStatus = getSupabaseConfigStatus();
 
   useEffect(() => {
@@ -55,7 +56,9 @@ export default function MasterTvsPage() {
 
   const rows = useMemo(
     () =>
-      restaurants.map((restaurant) => {
+      restaurants
+        .filter((restaurant) => restaurantFilter === "all" || restaurant.id === restaurantFilter)
+        .map((restaurant) => {
         const latestSession = sessions.find((session) => session.restaurantId === restaurant.id);
         const control =
           controls.find((currentControl) => currentControl.restaurantId === restaurant.id) ??
@@ -70,12 +73,13 @@ export default function MasterTvsPage() {
           control,
         };
       }),
-    [controls, getControl, restaurants, sessions, supabaseStatus.connected],
+    [controls, getControl, restaurantFilter, restaurants, sessions, supabaseStatus.connected],
   );
 
   return (
     <Layout title="TVs" eyebrow="Master operativo">
       <Card accent className="mb-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-4">
           <div className="grid h-12 w-12 place-items-center rounded-lg border border-mezcal/30 bg-mezcal/12 text-mezcal">
             <MonitorPlay size={24} />
@@ -86,6 +90,19 @@ export default function MasterTvsPage() {
               Rutas listas para abrir en Smart TV, navegador o mini PC.
             </p>
           </div>
+        </div>
+          <select
+            value={restaurantFilter}
+            onChange={(event) => setRestaurantFilter(event.target.value)}
+            className="h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none transition focus:border-mezcal/70 md:w-72"
+          >
+            <option value="all">Ver todas</option>
+            {restaurants.map((restaurant) => (
+              <option key={restaurant.id} value={restaurant.id}>
+                {restaurant.name}
+              </option>
+            ))}
+          </select>
         </div>
       </Card>
 
@@ -100,13 +117,23 @@ export default function MasterTvsPage() {
                 <h3 className="mt-2 font-display text-3xl text-bone">{row.restaurant.name}</h3>
                 <p className="mt-2 text-sm text-bone/55">{row.route}</p>
               </div>
-              <Link
-                href={row.route}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-bone/10 bg-bone/[0.05] px-3 text-sm font-semibold text-bone/72 transition hover:bg-bone/10"
-              >
-                <ExternalLink size={16} />
-                Abrir
-              </Link>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard?.writeText(`${window.location.origin}${row.route}`)}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-bone/10 bg-bone/[0.05] px-3 text-sm font-semibold text-bone/72 transition hover:bg-bone/10"
+                  title="Copiar URL"
+                >
+                  <Copy size={16} />
+                </button>
+                <Link
+                  href={row.route}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-bone/10 bg-bone/[0.05] px-3 text-sm font-semibold text-bone/72 transition hover:bg-bone/10"
+                >
+                  <ExternalLink size={16} />
+                  Abrir
+                </Link>
+              </div>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-bone/10 bg-obsidian/50 p-3">
