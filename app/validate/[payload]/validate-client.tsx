@@ -19,7 +19,10 @@ import {
 } from "@/lib/qr/qrCampaignStorage";
 import { decodeBoardValidationPayload, type BoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
-import { getActiveRealtimeSessionByRestaurantId } from "@/lib/supabase/sessionRealtime";
+import {
+  getActiveRealtimeSessionByRestaurantId,
+  type RealtimeGameSession,
+} from "@/lib/supabase/sessionRealtime";
 import type { QrCampaign, RestaurantConfig } from "@/lib/types";
 
 type ValidateClientProps = {
@@ -89,6 +92,51 @@ function isOperationalFolioInSession(payload: BoardValidationPayload | null, act
   return Number.isInteger(folioNumber) && folioNumber > 0 && folioNumber <= activeTables;
 }
 
+function formatDateRange(from?: string, to?: string) {
+  if (from && to) {
+    return `${from} - ${to}`;
+  }
+
+  if (from) {
+    return `Desde ${from}`;
+  }
+
+  if (to) {
+    return `Hasta ${to}`;
+  }
+
+  return "";
+}
+
+function resolveValidityText(input: {
+  batch: BoardBatch | null;
+  campaign?: QrCampaign;
+  isValid: boolean;
+  activeSession: RealtimeGameSession | null;
+}) {
+  if (!input.isValid) {
+    return "Vigencia finalizada";
+  }
+
+  const batchRange = input.batch ? formatDateRange(input.batch.validFrom, input.batch.validTo) : "";
+  if (batchRange) {
+    return batchRange;
+  }
+
+  const campaignRange = input.campaign
+    ? formatDateRange(input.campaign.validFrom, input.campaign.validTo)
+    : "";
+  if (campaignRange) {
+    return campaignRange;
+  }
+
+  if (input.activeSession) {
+    return "Valida durante la jugada activa";
+  }
+
+  return "Valida durante la jugada activa";
+}
+
 export function ValidateClient({ payload }: ValidateClientProps) {
   const decodedPayload = useMemo(() => decodeBoardValidationPayload(payload), [payload]);
   const [batch, setBatch] = useState<BoardBatch | null>(null);
@@ -96,6 +144,7 @@ export function ValidateClient({ payload }: ValidateClientProps) {
   const [restaurant, setRestaurant] = useState<RestaurantConfig | null>(null);
   const [isValid, setIsValid] = useState(false);
   const [boardExists, setBoardExists] = useState(false);
+  const [validityText, setValidityText] = useState("Vigencia finalizada");
 
   useEffect(() => {
     let isMounted = true;
@@ -119,10 +168,19 @@ export function ValidateClient({ payload }: ValidateClientProps) {
       setBatch(validation.batch);
       setBoardExists(validation.boardExists || isActiveSessionBatch);
       setIsValid(validation.isValid || isActiveSessionBatch);
-      setCampaigns(
-        decodedPayload ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId, "printed_qr") : [],
-      );
+      const activeCampaigns = decodedPayload
+        ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId, "printed_qr")
+        : [];
+      setCampaigns(activeCampaigns);
       setRestaurant(decodedPayload ? getRestaurantById(decodedPayload.restaurantId) ?? null : null);
+      setValidityText(
+        resolveValidityText({
+          batch: validation.batch,
+          campaign: activeCampaigns[0],
+          isValid: validation.isValid || isActiveSessionBatch,
+          activeSession,
+        }),
+      );
     }
 
     void loadValidation();
@@ -184,9 +242,7 @@ export function ValidateClient({ payload }: ValidateClientProps) {
             <ValidationItem label="Lote" value={batchName} />
             <ValidationItem
               label="Vigencia"
-              value={
-                batch ? `${batch.validFrom || "Sin inicio"} - ${batch.validTo || "Sin fin"}` : "No disponible"
-              }
+              value={validityText}
             />
           </div>
         </Card>

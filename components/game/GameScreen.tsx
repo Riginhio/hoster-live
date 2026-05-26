@@ -36,8 +36,9 @@ import {
 } from "@/lib/audio/gameAudio";
 import { getSupabaseClientDebugStatus, getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
-  getLatestRealtimeSessionByRestaurantId,
+  getActiveRealtimeSessionByRestaurantId,
   getLatestRealtimeSessionDebugByRestaurantId,
+  isTerminalRealtimeSession,
   realtimeSessionToSession,
   subscribeToRestaurantSession,
   type RestaurantSessionChannelStatus,
@@ -139,6 +140,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const previousWinnerFolioRef = useRef<string | undefined>(undefined);
   const lastImageTimingRef = useRef("");
   const previousDeckIdRef = useRef<string | undefined>(undefined);
+  const lastRuntimeWriteSignatureRef = useRef("");
   const supabaseStatus = getSupabaseConfigStatus();
   const supabaseDebugStatus = getSupabaseClientDebugStatus();
   const missingSupabaseVariables = supabaseStatus.missingVariables.join(", ");
@@ -290,7 +292,10 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   useEffect(() => {
     function syncSession() {
       try {
-        const activeRestaurantSession = realtimeSession ?? getActiveSessionByRestaurantId(tvRestaurantId);
+        const activeRestaurantSession =
+          realtimeSession?.status === "active"
+            ? realtimeSession
+            : getActiveSessionByRestaurantId(tvRestaurantId);
         const currentStoredSession = activeSession?.id
           ? getSessionById(activeSession.id)
           : undefined;
@@ -319,17 +324,28 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           const isCountdownSession = reconciledSession.autoplayStatus === "countdown";
 
           if (sessionRuntimeChanged(storedSession, reconciledSession)) {
-            void updateRealtimeSession(reconciledSession.id, {
-              autoplayStatus: reconciledSession.autoplayStatus,
-              calledCards: reconciledSession.calledCards,
-              winnerFolio: reconciledSession.winnerFolio,
-              winnerCards: reconciledSession.winnerCards,
-              autoplayStartedAt: reconciledSession.autoplayStartedAt,
-              playStartedAt: reconciledSession.playStartedAt,
-              playEndedAt: reconciledSession.playEndedAt,
-              durationSeconds: reconciledSession.durationSeconds,
-              lastUpdatedAt: reconciledSession.lastUpdatedAt,
-            });
+            const writeSignature = [
+              reconciledSession.id,
+              reconciledSession.autoplayStatus,
+              reconciledSession.calledCards.length,
+              reconciledSession.winnerFolio ?? "",
+              reconciledSession.playEndedAt ?? "",
+            ].join("|");
+
+            if (lastRuntimeWriteSignatureRef.current !== writeSignature) {
+              lastRuntimeWriteSignatureRef.current = writeSignature;
+              void updateRealtimeSession(reconciledSession.id, {
+                autoplayStatus: reconciledSession.autoplayStatus,
+                calledCards: reconciledSession.calledCards,
+                winnerFolio: reconciledSession.winnerFolio,
+                winnerCards: reconciledSession.winnerCards,
+                autoplayStartedAt: reconciledSession.autoplayStartedAt,
+                playStartedAt: reconciledSession.playStartedAt,
+                playEndedAt: reconciledSession.playEndedAt,
+                durationSeconds: reconciledSession.durationSeconds,
+                lastUpdatedAt: reconciledSession.lastUpdatedAt,
+              });
+            }
           }
 
           if (sessionIdChanged) {
@@ -400,6 +416,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
         lastSyncSignatureRef.current = "none";
         setActiveSession(null);
+        setRealtimeSession(null);
         setWinner(null);
         setCalledCards([]);
         previousCalledCountRef.current = 0;
@@ -448,7 +465,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     async function queryRealtimeSession() {
       try {
         const [result, debugResult] = await Promise.all([
-          getLatestRealtimeSessionByRestaurantId(realtimeRestaurantId),
+          getActiveRealtimeSessionByRestaurantId(realtimeRestaurantId),
           getLatestRealtimeSessionDebugByRestaurantId(realtimeRestaurantId),
         ]);
 
@@ -500,9 +517,17 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           console.time(timingLabel);
           console.timeEnd(timingLabel);
         }
-        const nextSession = session ? realtimeSessionToSession(session) : null;
+        const nextSession = session && !isTerminalRealtimeSession(session) ? realtimeSessionToSession(session) : null;
         setRealtimeSession(nextSession);
         setLastRealtimeSessionFound(Boolean(nextSession));
+        if (!nextSession) {
+          setActiveSession(null);
+          setCalledCards([]);
+          setWinner(null);
+          previousCalledCountRef.current = 0;
+          previousWinnerFolioRef.current = undefined;
+          lastRuntimeWriteSignatureRef.current = "";
+        }
         setLatestRealtimeDebugRow(
           session
             ? {

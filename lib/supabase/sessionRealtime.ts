@@ -85,6 +85,14 @@ const activeSessionStatuses = ["created", "countdown", "active", "playing"];
 const terminalSessionStatuses = ["completed", "cancelled", "closed_without_winner"];
 const activeAutoplayStatuses = ["idle", "countdown", "playing", "paused", "winner"];
 
+export function isTerminalRealtimeSession(row: Pick<RealtimeGameSession, "status" | "autoplay_status"> | null) {
+  if (!row) {
+    return true;
+  }
+
+  return terminalSessionStatuses.includes(String(row.status ?? ""));
+}
+
 export type RealtimeSessionUpdate = Partial<
   Pick<
     Session,

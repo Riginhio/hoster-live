@@ -14,10 +14,10 @@ import {
   type Session,
 } from "@/lib/sessions/sessionStorage";
 import {
-  getLatestRealtimeSessionByRestaurantId,
   realtimeSessionToSession,
   subscribeToRestaurantSession,
 } from "@/lib/supabase/sessionRealtime";
+import { getActiveSessionForRestaurant } from "@/lib/sessions/activeSession";
 import {
   type WinMode,
 } from "@/lib/loteria";
@@ -86,18 +86,20 @@ export default function GerenteTablasPage() {
         refreshBoardBatchesFromSupabase(),
       ]);
       const restaurant = refreshedRestaurants.restaurants.find((item) => item.id === restaurantId);
-      const remoteResult = restaurantId
-        ? await getLatestRealtimeSessionByRestaurantId(restaurantId)
-        : null;
-      const remoteSession =
-        remoteOverride ?? (remoteResult?.data ? realtimeSessionToSession(remoteResult.data) : null);
+      const activeResult = restaurantId ? await getActiveSessionForRestaurant(restaurantId) : null;
+      const remoteSession = remoteOverride?.status === "active" ? remoteOverride : activeResult?.session ?? null;
       const activeSession = restaurantId ? getActiveSessionByRestaurantId(restaurantId) : undefined;
       const latestLocalSession = getSessions().find((item) =>
         restaurantId ? item.restaurantId === restaurantId : true,
       );
       const localSession = activeSession ?? latestLocalSession ?? null;
       const nextSession = chooseNewestSession(remoteSession, localSession);
-      const source = remoteSession && nextSession?.id === remoteSession.id ? "Supabase" : refreshedRestaurants.source;
+      const source =
+        activeResult?.source === "supabase"
+          ? "Supabase"
+          : remoteSession && nextSession?.id === remoteSession.id
+            ? "Supabase"
+            : refreshedRestaurants.source;
       const ensuredBatch = nextSession ? ensureBoardBatchForSession(nextSession) : null;
       const restaurantBatches = getBoardBatches().filter((batch) =>
         restaurantId ? batch.restaurantId === restaurantId : true,

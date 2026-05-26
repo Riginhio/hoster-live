@@ -29,7 +29,6 @@ import { checkWinner, type LoteriaBoard, type LoteriaCard, type WinMode } from "
 import {
   cancelSession,
   closeSession,
-  getActiveSession,
   getSessionById,
   getSessionDeck,
   hydrateSessionCards,
@@ -53,7 +52,6 @@ import { getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
   closeRealtimeSession,
   createRealtimeSession,
-  getLatestRealtimeSessionByRestaurantId,
   realtimeSessionToSession,
   type RealtimeSessionUpdate,
   updateRealtimeSession,
@@ -61,6 +59,7 @@ import {
 import { preloadDeckImages, resetDeckPreloadCache } from "@/lib/decks/preloadImages";
 import { decks } from "@/lib/decks";
 import { reconcileSessionByClock, sessionRuntimeChanged } from "@/lib/sessions/sessionRuntime";
+import { getActiveSessionForRestaurant } from "@/lib/sessions/activeSession";
 
 const modeLabels: Record<WinMode, string> = {
   four_corners: "4 esquinas",
@@ -282,14 +281,10 @@ export default function JugadaActivaPage() {
       return;
     }
 
-    const remoteResult = await getLatestRealtimeSessionByRestaurantId(restaurantId);
-    const remoteSession = remoteResult.data ? realtimeSessionToSession(remoteResult.data) : null;
-    const activeSession = session?.id ? getSessionById(session.id) : getActiveSession(restaurantId);
-    const latestLocalSession =
-      getActiveSession(restaurantId) ??
-      (session?.id ? getSessionById(session.id) : undefined) ??
-      null;
-    const selectedSession = chooseNewestSession(remoteSession, activeSession ?? latestLocalSession);
+    const activeResult = await getActiveSessionForRestaurant(restaurantId);
+    const activeSession = activeResult.session;
+    const currentLocalSession = session?.id ? getSessionById(session.id) : null;
+    const selectedSession = chooseNewestSession(activeSession, currentLocalSession);
     const selectedBatch = selectedSession ? getBatchForSession(selectedSession) : null;
     const selectedBoards = selectedBatch ? toLoteriaBoards(selectedBatch.boards).slice(0, selectedSession?.activeTables ?? 0) : [];
     const normalizedSession = selectedSession
@@ -316,14 +311,14 @@ export default function JugadaActivaPage() {
       normalizedSession ? hydrateSessionCards(normalizedSession.calledCards, normalizedSession.deckId) : [],
     );
     setWinner(getWinnerFromSession(normalizedSession));
-    setSyncSource(remoteSession && normalizedSession?.id === remoteSession.id ? "Supabase" : "localStorage");
+    setSyncSource(activeResult.source === "supabase" ? "Supabase" : activeResult.source);
     console.info("[HOSTER LIVE][GERENTE ACTIVA] debug", {
       user: currentUser?.email ?? currentUser?.name,
       restaurantId,
       latestSessionId: normalizedSession?.id,
       latestSessionDeckId: normalizedSession?.deckId,
       latestSessionStatus: normalizedSession?.status,
-      source: remoteSession && normalizedSession?.id === remoteSession.id ? "Supabase" : "localStorage",
+      source: activeResult.source,
     });
 
   }, [currentUser?.email, currentUser?.name, restaurantId, session?.id]);
