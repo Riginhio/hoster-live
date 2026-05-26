@@ -155,7 +155,14 @@ export default function MasterUsuariosPage() {
             ) : null}
             <input
               value={formState.username}
-              onChange={(event) => setFormState((current) => ({ ...current, username: event.target.value }))}
+              onChange={(event) =>
+                setFormState((current) => ({ ...current, username: event.target.value }))
+              }
+              type="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
               placeholder="username"
             />
@@ -164,6 +171,9 @@ export default function MasterUsuariosPage() {
                 type={showPassword ? "text" : "password"}
                 value={formState.password}
                 onChange={(event) => setFormState((current) => ({ ...current, password: event.target.value }))}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 className="h-11 min-w-0 flex-1 bg-transparent px-3 text-bone outline-none"
                 placeholder="password"
               />
@@ -173,7 +183,7 @@ export default function MasterUsuariosPage() {
                 className="grid h-11 w-11 place-items-center text-bone/65 transition hover:text-bone"
                 title={showPassword ? "Ocultar password" : "Mostrar password"}
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
             <select
@@ -270,8 +280,8 @@ export default function MasterUsuariosPage() {
                       onClick={() =>
                         setFormState({
                           id: user.id,
-                          username: user.username,
-                          password: user.password,
+                          username: user.username.trim().toLowerCase(),
+                          password: user.password.trim(),
                           name: user.name,
                           restaurantId: user.restaurantId,
                           restaurantIds: user.restaurantIds,

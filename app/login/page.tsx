@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -11,10 +12,11 @@ export default function LoginPage() {
   const [email, setEmail] = useState("master@hosterlive.mx");
   const [password, setPassword] = useState("Hoster123");
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = login(email, password);
+    const result = await login(email, password);
 
     if (!result.ok) {
       setError(result.error);
@@ -77,19 +79,37 @@ export default function LoginPage() {
                 <input
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
+                  type="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   className="h-12 w-full rounded-lg border border-bone/10 bg-black/35 px-4 text-bone outline-none transition placeholder:text-bone/28 focus:border-mezcal/70 focus:shadow-[0_0_24px_rgba(217,164,65,0.12)]"
                   placeholder="gerente@hosterlive.mx"
                 />
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-bone/70">Password</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="h-12 w-full rounded-lg border border-bone/10 bg-black/35 px-4 text-bone outline-none transition placeholder:text-bone/28 focus:border-mezcal/70 focus:shadow-[0_0_24px_rgba(217,164,65,0.12)]"
-                  placeholder="********"
-                />
+                <div className="flex rounded-lg border border-bone/10 bg-black/35 focus-within:border-mezcal/70 focus-within:shadow-[0_0_24px_rgba(217,164,65,0.12)]">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="h-12 min-w-0 flex-1 bg-transparent px-4 text-bone outline-none transition placeholder:text-bone/28"
+                    placeholder="********"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="grid h-12 w-12 place-items-center text-bone/70 transition hover:text-bone"
+                    title={showPassword ? "Ocultar password" : "Mostrar password"}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </label>
               {error ? (
                 <p className="rounded-lg border border-chile/30 bg-chile/10 px-3 py-2 text-sm font-semibold text-[#ff9b91]">

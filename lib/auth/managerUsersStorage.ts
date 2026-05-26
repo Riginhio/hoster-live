@@ -46,7 +46,7 @@ function normalizeUser(user: Partial<ManagerUser>): ManagerUser {
   return {
     id: user.id ?? createId(),
     username: (user.username ?? "gerente").trim().toLowerCase(),
-    password: user.password ?? "Hoster123",
+    password: (user.password ?? "Hoster123").trim(),
     name: user.name ?? "Gerente",
     restaurantId: normalizeRestaurantSlug(user.restaurantId, "rancho-viejo"),
     restaurantIds: user.restaurantIds?.length
@@ -73,20 +73,24 @@ export function getManagerUsers(): ManagerUser[] {
   try {
     const parsedValue = JSON.parse(rawValue) as ManagerUser[];
     const users = Array.isArray(parsedValue) ? parsedValue.map(normalizeUser) : [];
-    saveManagerUsers(users);
+    saveManagerUsers(users, { syncSupabase: false });
     return users;
   } catch {
     return [];
   }
 }
 
-export function saveManagerUsers(users: ManagerUser[]) {
+export function saveManagerUsers(users: ManagerUser[], options: { syncSupabase?: boolean } = {}) {
   if (!hasLocalStorage()) {
     return users;
   }
 
   window.localStorage.setItem(managerUsersStorageKey, JSON.stringify(users.map(normalizeUser)));
-  void upsertManagerUsersToSupabase(users);
+
+  if (options.syncSupabase !== false) {
+    void upsertManagerUsersToSupabase(users);
+  }
+
   return users;
 }
 
@@ -102,7 +106,7 @@ export async function refreshManagerUsersFromSupabase() {
   }
 
   return {
-    users: saveManagerUsers(result.data),
+    users: saveManagerUsers(result.data, { syncSupabase: false }),
     source: "Supabase",
     error: null,
   };

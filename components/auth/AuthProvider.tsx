@@ -10,7 +10,11 @@ import {
   type ReactNode,
 } from "react";
 import { mockUsers, toAuthUser, type AuthUser, type UserRole } from "@/lib/auth/mockUsers";
-import { getManagerUsers } from "@/lib/auth/managerUsersStorage";
+import {
+  getManagerUsers,
+  refreshManagerUsersFromSupabase,
+} from "@/lib/auth/managerUsersStorage";
+import { refreshRestaurantsFromSupabase } from "@/lib/restaurants/restaurantStorage";
 import { clearAuthCookie, parseAuthCookieValue, setAuthCookie } from "@/lib/auth/sessionCookie";
 import { ensureDemoSeed } from "@/lib/demo/demoSeed";
 
@@ -21,7 +25,7 @@ type LoginResult =
 type AuthContextValue = {
   currentUser: AuthUser | null;
   isReady: boolean;
-  login: (email: string, password: string) => LoginResult;
+  login: (email: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   hasRole: (roles: UserRole | UserRole[]) => boolean;
 };
@@ -39,6 +43,14 @@ function getRedirectForRole(user: AuthUser) {
   }
 
   return `/tv/${user.restaurantId ?? "rancho-viejo"}`;
+}
+
+function normalizeAuthInput(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function buildAuthError(message: string) {
+  return { ok: false as const, error: message };
 }
 
 function parseStoredUser(rawValue: string | null) {
@@ -125,13 +137,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsReady(true);
   }, []);
 
-  const login = useCallback((email: string, password: string): LoginResult => {
-    const normalizedEmail = email.trim().toLowerCase();
-    const managerUser = getManagerUsers().find(
-      (user) => user.active && user.username.toLowerCase() === normalizedEmail && user.password === password,
+  const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
+    const normalizedEmail = normalizeAuthInput(email);
+    const normalizedPassword = password.trim();
+
+    if (!normalizedEmail || !normalizedPassword) {
+      return buildAuthError("Usuario y password son obligatorios.");
+    }
+
+    const refreshedRestaurants = await refreshRestaurantsFromSupabase();
+    const restaurantSource = refreshedRestaurants.source;
+    const restaurants = refreshedRestaurants.restaurants;
+
+    const managerUsersResult = await refreshManagerUsersFromSupabase();
+    const managerUsers = managerUsersResult.users;
+
+    const managerUser = managerUsers.find(
+      (user) => user.active && normalizeAuthInput(user.username) === normalizedEmail,
     );
 
     if (managerUser) {
+      const restaurant =
+        restaurants.find(
+          (item) =>
+            item.id === managerUser.restaurantId ||
+            item.slug === managerUser.restaurantId ||
+            normalizeAuthInput(item.name) === managerUser.restaurantId,
+        ) ?? null;
+
+      if (!restaurant) {
+        return buildAuthError("Restaurante no encontrado.");
+      }
+
+      if (!restaurant.active && restaurantSource === "Supabase") {
+        return buildAuthError("Restaurante inactivo.");
+      }
+
+      if (managerUser.password.trim() !== normalizedPassword) {
+        return buildAuthError("Password incorrecta.");
+      }
+
       const isTvUser = managerUser.role === "tv";
       const authUser: AuthUser = {
         email: managerUser.username,
@@ -151,11 +196,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const user = mockUsers.find(
       (mockUser) =>
-        mockUser.email.toLowerCase() === normalizedEmail && mockUser.password === password,
+        mockUser.email.toLowerCase() === normalizedEmail && mockUser.password.trim() === normalizedPassword,
     );
 
     if (!user) {
-      return { ok: false, error: "Credenciales invalidas para HOSTER LIVE." };
+      const existingRemoteUser = managerUsers.find(
+        (item) => normalizeAuthInput(item.username) === normalizedEmail,
+      );
+
+      if (existingRemoteUser) {
+        return buildAuthError(
+          existingRemoteUser.active ? "Password incorrecta." : "Usuario inactivo.",
+        );
+      }
+
+      return buildAuthError("Usuario no encontrado.");
     }
 
     const authUser = toAuthUser(user);

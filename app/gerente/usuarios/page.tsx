@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Pencil, Plus, Power, Trash2, X } from "lucide-react";
+import { Eye, EyeOff, Pencil, Plus, Power, Trash2, X } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import {
   deleteManagerUser,
   getManagerUsers,
+  refreshManagerUsersFromSupabase,
   toggleManagerUser,
   upsertManagerUser,
   type ManagerUser,
@@ -24,14 +25,18 @@ export default function GerenteUsuariosPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [editingUserId, setEditingUserId] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const isPlay = currentUser?.venueRole === "play";
 
   function refreshUsers() {
-    setUsers(
-      getManagerUsers().filter(
-        (user) => user.restaurantId === currentUser?.restaurantId && user.role === "play",
-      ),
-    );
+    void refreshManagerUsersFromSupabase().then((result) => {
+      const sourceUsers = result.users.length ? result.users : getManagerUsers();
+      setUsers(
+        sourceUsers.filter(
+          (user) => user.restaurantId === currentUser?.restaurantId && user.role === "play",
+        ),
+      );
+    });
   }
 
   useEffect(() => {
@@ -50,9 +55,9 @@ export default function GerenteUsuariosPage() {
     const existingUser = users.find((user) => user.id === editingUserId);
     upsertManagerUser({
       id: editingUserId || undefined,
-      username,
-      password: password || "Hoster123",
-      name: name || username,
+      username: username.trim().toLowerCase(),
+      password: (password || "Hoster123").trim(),
+      name: (name || username).trim(),
       restaurantId: currentUser.restaurantId,
       role: "play",
       active: existingUser?.active ?? true,
@@ -71,8 +76,8 @@ export default function GerenteUsuariosPage() {
 
   function handleEdit(user: ManagerUser) {
     setEditingUserId(user.id);
-    setUsername(user.username);
-    setPassword(user.password);
+    setUsername(user.username.trim().toLowerCase());
+    setPassword(user.password.trim());
     setName(user.name);
   }
 
@@ -119,15 +124,34 @@ export default function GerenteUsuariosPage() {
               <input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="Usuario"
                 className={inputClassName}
               />
-              <input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Password mock"
-                className={inputClassName}
-              />
+              <div className="flex rounded-lg border border-bone/12 bg-bone/[0.045] focus-within:border-mezcal/70">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="Password mock"
+                  className={`${inputClassName} min-w-0 flex-1 border-0 bg-transparent`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="grid h-11 w-11 place-items-center text-bone/65 transition hover:text-bone"
+                  title={showPassword ? "Ocultar password" : "Mostrar password"}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
               <Button type="submit">
                 <Plus size={16} />
                 {editingUserId ? "Actualizar Play" : "Crear Play"}
