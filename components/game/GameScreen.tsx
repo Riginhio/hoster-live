@@ -15,7 +15,12 @@ import {
   parseStoredDemoConfig,
   type DemoGameConfig,
 } from "@/lib/demoConfig";
-import { getRestaurantById } from "@/lib/restaurants";
+import {
+  defaultRestaurants,
+  getRestaurantById,
+  refreshRestaurantsFromSupabase,
+} from "@/lib/restaurants/restaurantStorage";
+import type { RestaurantConfig } from "@/lib/types";
 import {
   getActiveSessionByRestaurantId,
   hydrateSessionCards,
@@ -48,6 +53,7 @@ import { getDeckCards } from "@/lib/decks";
 import { getTvControl, type TvControl } from "@/lib/tv/tvControlStorage";
 import { preloadDeckImages, resetDeckPreloadCache } from "@/lib/decks/preloadImages";
 import { reconcileSessionByClock, sessionRuntimeChanged } from "@/lib/sessions/sessionRuntime";
+import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
 type GameScreenProps = {
   restaurantId: string;
@@ -115,7 +121,16 @@ function getSessionSyncSignature(session: Session) {
   ].join("|");
 }
 
+function getTime(value?: string) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
 export function GameScreen({ restaurantId }: GameScreenProps) {
+  const [restaurant, setRestaurant] = useState<RestaurantConfig | null>(() =>
+    getRestaurantById(restaurantId) ?? null,
+  );
+  const [restaurantStatus, setRestaurantStatus] = useState<"loading" | "found" | "not_found">("loading");
   const [config, setConfig] = useState<DemoGameConfig>(() =>
     createDefaultDemoConfig(restaurantId),
   );
@@ -134,12 +149,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [lastEventReceived, setLastEventReceived] = useState("sin eventos");
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [tvControl, setTvControl] = useState<TvControl | undefined>();
+  const [failedImageIds, setFailedImageIds] = useState<string[]>([]);
   const lastSyncSignatureRef = useRef("");
   const previousCalledCountRef = useRef(0);
   const previousWinnerFolioRef = useRef<string | undefined>(undefined);
   const lastImageTimingRef = useRef("");
   const previousDeckIdRef = useRef<string | undefined>(undefined);
   const lastRuntimeWriteSignatureRef = useRef("");
+  const lastSeenSessionUpdatedAtRef = useRef(0);
   const activeSessionRef = useRef<Session | null>(null);
   const realtimeSessionRef = useRef<Session | null>(null);
   const audioEnabledRef = useRef(false);
@@ -165,23 +182,60 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           ? "Reconectando realtime"
           : syncBadgeLabel;
 
-  const restaurant = getRestaurantById(restaurantId);
-  const tvRestaurantId = restaurant.id;
+  useEffect(() => {
+    let isMounted = true;
+    const slug = normalizeRestaurantSlug(restaurantId);
+
+    async function loadRestaurant() {
+      const result = await refreshRestaurantsFromSupabase();
+      const foundRestaurant =
+        result.restaurants.find(
+          (item) =>
+            item.id === slug ||
+            item.slug === slug ||
+            normalizeRestaurantSlug(item.name) === slug,
+        ) ?? null;
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (result.source === "Supabase") {
+        setRestaurant(foundRestaurant);
+        setRestaurantStatus(foundRestaurant ? "found" : "not_found");
+        return;
+      }
+
+      const localRestaurant = getRestaurantById(slug) ?? null;
+      setRestaurant(localRestaurant);
+      setRestaurantStatus(localRestaurant ? "found" : "not_found");
+    }
+
+    void loadRestaurant();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [restaurantId]);
+
+  const safeRestaurant = restaurant ?? getRestaurantById("rancho-viejo") ?? defaultRestaurants[0];
+  const tvRestaurantId = safeRestaurant.id;
   const realtimeRestaurantId = tvRestaurantId;
-  const restaurantPrimary = restaurant.primaryColor || restaurant.theme.primaryColor;
-  const restaurantSecondary = restaurant.secondaryColor || restaurant.theme.secondaryColor;
-  const restaurantAccent = restaurant.accentColor || "#d9a441";
+  const restaurantPrimary = safeRestaurant.primaryColor || safeRestaurant.theme.primaryColor;
+  const restaurantSecondary = safeRestaurant.secondaryColor || safeRestaurant.theme.secondaryColor;
+  const restaurantAccent = safeRestaurant.accentColor || "#d9a441";
   const currentCard = calledCards[calledCards.length - 1] ?? null;
+  const currentCardImageFailed = currentCard ? failedImageIds.includes(currentCard.id) : false;
   const isAccumulatedGame = activeSession?.gameType === "accumulated_special";
   const activePromotions = activeSession?.activePromotions ?? [];
-  const deckSize = getDeckCards(activeSession?.deckId ?? restaurant.activeDeck).length;
-  const standbyTitle = restaurant.standbyTitle || "HOSTER LIVE";
+  const deckSize = getDeckCards(activeSession?.deckId ?? safeRestaurant.activeDeck).length;
+  const standbyTitle = safeRestaurant.standbyTitle || "HOSTER LIVE";
   const standbySubtitle =
-    restaurant.standbySubtitle || "La proxima jugada esta por comenzar";
+    safeRestaurant.standbySubtitle || "La proxima jugada esta por comenzar";
   const standbyPromoText =
-    restaurant.standbyPromoText || "Compra tus tablas con tu hostess";
-  const standbyCtaText = restaurant.standbyCtaText || "Pide tu tabla ahora";
-  const standbyPromotions = restaurant.standbyRotatePromotions
+    safeRestaurant.standbyPromoText || "Compra tus tablas con tu hostess";
+  const standbyCtaText = safeRestaurant.standbyCtaText || "Pide tu tabla ahora";
+  const standbyPromotions = safeRestaurant.standbyRotatePromotions
     ? getActiveQrCampaignsForRestaurant(tvRestaurantId, "tv_standby")
     : [];
   const visualStatus = activeSession?.autoplayStatus === "countdown"
@@ -250,11 +304,12 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   ]);
 
   useEffect(() => {
-    const nextDeckId = activeSession?.deckId ?? restaurant.activeDeck;
+    const nextDeckId = activeSession?.deckId ?? safeRestaurant.activeDeck;
 
     if (previousDeckIdRef.current && previousDeckIdRef.current !== nextDeckId) {
       setCalledCards([]);
       setWinner(null);
+      setFailedImageIds([]);
       lastImageTimingRef.current = "";
       previousCalledCountRef.current = 0;
       previousWinnerFolioRef.current = undefined;
@@ -262,8 +317,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     }
 
     previousDeckIdRef.current = nextDeckId;
-    void preloadDeckImages(activeSession?.deckId ?? restaurant.activeDeck, "tv");
-  }, [activeSession?.deckId, restaurant.activeDeck]);
+    void preloadDeckImages(activeSession?.deckId ?? safeRestaurant.activeDeck, "tv");
+  }, [activeSession?.deckId, safeRestaurant.activeDeck]);
 
   useEffect(() => {
     if (!currentCard) {
@@ -318,6 +373,29 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
         if (storedSession) {
           const previousSessionId = currentActiveSession?.id;
+          const currentActiveTime = getTime(currentActiveSession?.lastUpdatedAt);
+          const storedTime = getTime(storedSession.lastUpdatedAt);
+
+          if (
+            currentActiveSession?.id === storedSession.id &&
+            currentActiveSession.winnerFolio &&
+            !storedSession.winnerFolio &&
+            storedTime <= currentActiveTime
+          ) {
+            return;
+          }
+
+          if (
+            currentActiveSession?.id === storedSession.id &&
+            lastSeenSessionUpdatedAtRef.current > storedTime
+          ) {
+            return;
+          }
+
+          lastSeenSessionUpdatedAtRef.current = Math.max(
+            lastSeenSessionUpdatedAtRef.current,
+            storedTime,
+          );
           const syncSignature = getSessionSyncSignature(storedSession);
 
           if (
@@ -347,7 +425,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               reconciledSession.playEndedAt ?? "",
             ].join("|");
 
-            if (lastRuntimeWriteSignatureRef.current !== writeSignature) {
+            if (
+              !storedSession.winnerFolio &&
+              storedSession.status === "active" &&
+              lastRuntimeWriteSignatureRef.current !== writeSignature
+            ) {
               lastRuntimeWriteSignatureRef.current = writeSignature;
               void updateRealtimeSession(reconciledSession.id, {
                 autoplayStatus: reconciledSession.autoplayStatus,
@@ -630,6 +712,32 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     setAudioEnabled(false);
   }
 
+  if (restaurantStatus === "loading") {
+    return (
+      <div className="screen-safe grid place-items-center bg-obsidian p-8">
+        <section className="text-center">
+          <p className="text-xs font-black uppercase tracking-[0.3em] text-mezcal">
+            HOSTER LIVE
+          </p>
+          <h1 className="mt-4 font-display text-6xl text-bone">Cargando TV</h1>
+        </section>
+      </div>
+    );
+  }
+
+  if (!restaurant || restaurantStatus === "not_found") {
+    return (
+      <div className="screen-safe grid place-items-center bg-obsidian p-8">
+        <section className="text-center">
+          <p className="text-xs font-black uppercase tracking-[0.3em] text-mezcal">
+            HOSTER LIVE
+          </p>
+          <h1 className="mt-4 font-display text-6xl text-bone">Restaurante no encontrado</h1>
+        </section>
+      </div>
+    );
+  }
+
   if (tvControl?.disabled) {
     return (
       <div className="screen-safe grid place-items-center bg-obsidian p-8">
@@ -637,13 +745,13 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           <p className="text-xs font-black uppercase tracking-[0.3em] text-mezcal">
             Pantalla temporalmente desactivada
           </p>
-          <h1 className="mt-4 font-display text-6xl text-bone">{restaurant.name}</h1>
+          <h1 className="mt-4 font-display text-6xl text-bone">{safeRestaurant.name}</h1>
         </section>
       </div>
     );
   }
 
-  const tvOverlay = <TvBroadcastOverlay control={tvControl} restaurantName={restaurant.name} />;
+  const tvOverlay = <TvBroadcastOverlay control={tvControl} restaurantName={safeRestaurant.name} />;
 
   if (visualStatus === "countdown") {
     return (
@@ -686,10 +794,10 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               )}
             </div>
             <div className="mx-auto mb-8 flex w-fit items-center gap-3 rounded-lg border border-bone/10 bg-obsidian/60 px-4 py-3">
-              {restaurant.logoUrl ? (
+              {safeRestaurant.logoUrl ? (
                 <img
-                  src={restaurant.logoUrl}
-                  alt={restaurant.name}
+                  src={safeRestaurant.logoUrl}
+                  alt={safeRestaurant.name}
                   className="h-12 w-12 rounded-lg border border-bone/10 bg-bone/8 object-contain p-1"
                 />
               ) : (
@@ -700,7 +808,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                   className="text-xs font-black uppercase tracking-[0.28em]"
                   style={{ color: restaurantAccent }}
                 >
-                  {restaurant.name}
+                  {safeRestaurant.name}
                 </p>
                 <p className="font-display text-3xl text-bone">HOSTER LIVE</p>
               </div>
@@ -714,7 +822,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             </h1>
 
             <div className="mx-auto mt-7 grid max-w-4xl gap-3 md:grid-cols-4">
-              <StatusTile label="Restaurante" value={restaurant.name} color={restaurantPrimary} />
+              <StatusTile label="Restaurante" value={safeRestaurant.name} color={restaurantPrimary} />
               <StatusTile label="Modalidad" value={modeLabels[config.mode]} />
               <StatusTile label="Tablas" value={String(config.activeTables)} color={restaurantSecondary} />
               <StatusTile label="Premio" value={`$${config.calculatedPrize}`} />
@@ -789,9 +897,9 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             boxShadow: `0 0 42px ${restaurantPrimary}20`,
           }}
         >
-          {restaurant.standbyImageUrl ? (
+          {safeRestaurant.standbyImageUrl ? (
             <img
-              src={restaurant.standbyImageUrl}
+              src={safeRestaurant.standbyImageUrl}
               alt=""
               className="absolute inset-0 h-full w-full object-cover opacity-[0.18]"
             />
@@ -799,10 +907,10 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           <div className="relative z-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_26rem] lg:items-center">
             <div>
               <div className="mb-10 flex items-center gap-4">
-                {restaurant.logoUrl ? (
+                {safeRestaurant.logoUrl ? (
                   <img
-                    src={restaurant.logoUrl}
-                    alt={restaurant.name}
+                    src={safeRestaurant.logoUrl}
+                    alt={safeRestaurant.name}
                     className="h-16 w-16 rounded-lg border border-bone/10 bg-bone/8 object-contain p-1.5"
                   />
                 ) : (
@@ -813,7 +921,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                     className="text-xs font-black uppercase tracking-[0.3em]"
                     style={{ color: restaurantAccent }}
                   >
-                    {restaurant.name}
+                    {safeRestaurant.name}
                   </p>
                   <p className="mt-1 text-xs font-black uppercase tracking-[0.22em] text-bone/45">
                     HOSTER LIVE
@@ -834,13 +942,13 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 {standbyPromoText}
               </p>
 
-              {restaurant.standbyCtaQrUrl ? (
+              {safeRestaurant.standbyCtaQrUrl ? (
                 <div className="mt-5 inline-flex max-w-full flex-col rounded-lg border border-bone/10 bg-obsidian/65 px-5 py-4 text-left">
                   <p className="text-xs font-black uppercase tracking-[0.24em] text-agave">
                     {standbyCtaText}
                   </p>
                   <p className="mt-2 break-all text-sm font-semibold text-bone/65">
-                    {restaurant.standbyCtaQrUrl}
+                    {safeRestaurant.standbyCtaQrUrl}
                   </p>
                 </div>
               ) : (
@@ -1037,7 +1145,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                           />
                         ) : null}
                         <p className="text-[10px] font-black uppercase tracking-[0.18em] text-mezcal">
-                          {promotion.sponsorName || restaurant.name}
+                          {promotion.sponsorName || safeRestaurant.name}
                         </p>
                       </div>
                       <p className="mt-2 font-display text-xl text-bone">{promotion.title}</p>
@@ -1059,10 +1167,10 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             }}
           >
             <div className="flex items-center gap-3">
-              {restaurant.logoUrl ? (
+              {safeRestaurant.logoUrl ? (
                 <img
-                  src={restaurant.logoUrl}
-                  alt={restaurant.name}
+                  src={safeRestaurant.logoUrl}
+                  alt={safeRestaurant.name}
                   className="h-12 w-12 rounded-lg border border-bone/10 bg-bone/8 object-contain p-1"
                 />
               ) : (
@@ -1073,7 +1181,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                   className="text-xs font-bold uppercase tracking-[0.28em]"
                   style={{ color: restaurantAccent }}
                 >
-                  {restaurant.name}
+                  {safeRestaurant.name}
                 </p>
                 <h1 className="font-display text-3xl text-bone md:text-5xl">HOSTER LIVE</h1>
                 {isAccumulatedGame ? (
@@ -1189,7 +1297,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                 {currentCard ? String(currentCard.number).padStart(2, "0") : "--"}
               </div>
               <div className="relative aspect-[0.63] w-full max-w-[360px] overflow-hidden rounded-lg border-2 border-mezcal bg-bone shadow-glow md:max-w-[440px]">
-                {currentCard ? (
+                {currentCard && !currentCardImageFailed ? (
                   <Image
                     src={currentCard.image}
                     alt={currentCard.name}
@@ -1207,7 +1315,34 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
                       console.time(timingLabel);
                       console.timeEnd(timingLabel);
                     }}
+                    onError={() => {
+                      console.warn("[HOSTER LIVE][TV] No se pudo cargar imagen de carta", {
+                        cardId: currentCard.id,
+                        image: currentCard.image,
+                      });
+                      setFailedImageIds((currentIds) =>
+                        currentIds.includes(currentCard.id)
+                          ? currentIds
+                          : [...currentIds.slice(-20), currentCard.id],
+                      );
+                    }}
                   />
+                ) : currentCard ? (
+                  <div className="grid h-full place-items-center bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-center text-obsidian">
+                    <div>
+                      <p className="text-5xl font-black">
+                        {String(currentCard.number).padStart(2, "0")}
+                      </p>
+                      <p className="mt-4 font-display text-5xl leading-tight">
+                        {currentCard.name}
+                      </p>
+                      {currentCard.confederation ? (
+                        <p className="mt-3 text-sm font-black uppercase tracking-[0.18em]">
+                          {currentCard.confederation}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
                 ) : (
                   <div className="grid h-full place-items-center bg-[linear-gradient(145deg,#f7edd9,#d8b56a)] p-5 text-obsidian">
                     <BrandMark

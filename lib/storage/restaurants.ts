@@ -367,7 +367,7 @@ export function getRestaurants(): RestaurantConfig[] {
   const storedRestaurants = window.localStorage.getItem(restaurantsStorageKey);
 
   if (!storedRestaurants) {
-    saveRestaurants(defaultRestaurants);
+    saveRestaurants(defaultRestaurants, { syncSupabase: false });
     return defaultRestaurants;
   }
 
@@ -375,20 +375,23 @@ export function getRestaurants(): RestaurantConfig[] {
     const parsedRestaurants = JSON.parse(storedRestaurants) as RestaurantConfig[];
 
     if (!Array.isArray(parsedRestaurants) || parsedRestaurants.length === 0) {
-      saveRestaurants(defaultRestaurants);
+      saveRestaurants(defaultRestaurants, { syncSupabase: false });
       return defaultRestaurants;
     }
 
     const restaurants = mergeDefaultRestaurants(parsedRestaurants.map(normalizeRestaurant));
-    saveRestaurants(restaurants);
+    saveRestaurants(restaurants, { syncSupabase: false });
     return restaurants;
   } catch {
-    saveRestaurants(defaultRestaurants);
+    saveRestaurants(defaultRestaurants, { syncSupabase: false });
     return defaultRestaurants;
   }
 }
 
-export function saveRestaurants(restaurants: RestaurantConfig[]) {
+export function saveRestaurants(
+  restaurants: RestaurantConfig[],
+  options: { syncSupabase?: boolean } = {},
+) {
   if (!hasLocalStorage()) {
     return restaurants;
   }
@@ -403,7 +406,9 @@ export function saveRestaurants(restaurants: RestaurantConfig[]) {
       .values(),
   );
   window.localStorage.setItem(restaurantsStorageKey, JSON.stringify(normalizedRestaurants));
-  void upsertRestaurantsToSupabase(normalizedRestaurants);
+  if (options.syncSupabase !== false) {
+    void upsertRestaurantsToSupabase(normalizedRestaurants);
+  }
   return normalizedRestaurants;
 }
 
@@ -419,7 +424,7 @@ export async function refreshRestaurantsFromSupabase() {
   }
 
   return {
-    restaurants: saveRestaurants(result.data),
+    restaurants: saveRestaurants(result.data, { syncSupabase: false }),
     source: "Supabase",
     error: null,
   };
