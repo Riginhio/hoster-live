@@ -6,6 +6,7 @@ import { getDeckCards, normalizeDeckId, type DeckId, type GameId } from "@/lib/d
 import { encodeBoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import type { Session } from "@/lib/sessions/sessionStorage";
 import {
   getBoardBatchesFromSupabase,
   upsertBoardBatchesToSupabase,
@@ -129,6 +130,41 @@ function createDefaultBatch(
     validTo,
     boards: createBoardsForBatch(id, slug, 50, deckId),
     createdAt: "2026-05-21T00:00:00.000Z",
+  };
+}
+
+function createOperationalBatch(input: {
+  id: string;
+  restaurantId: string;
+  restaurantName: string;
+  name: string;
+  gameId?: GameId;
+  deckId: DeckId;
+  quantity: number;
+  status?: BoardBatchStatus;
+  validFrom?: string;
+  validTo?: string;
+  createdAt?: string;
+}): BoardBatch {
+  const slug = normalizeRestaurantSlug(input.restaurantId);
+  const validFrom = input.validFrom ?? new Date().toISOString().slice(0, 10);
+  const validTo =
+    input.validTo ??
+    new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  return {
+    id: input.id,
+    restaurantId: slug,
+    gameId: input.gameId ?? "loteria",
+    deckId: normalizeDeckId(input.deckId),
+    restaurantName: input.restaurantName,
+    name: input.name,
+    quantity: input.quantity,
+    status: input.status ?? "active",
+    validFrom,
+    validTo,
+    boards: createBoardsForBatch(input.id, slug, input.quantity, input.deckId),
+    createdAt: input.createdAt ?? new Date().toISOString(),
   };
 }
 
@@ -270,10 +306,10 @@ export function createBoardBatch(input: {
   const restaurant = getRestaurantById(input.restaurantId) ?? getRestaurantById(input.restaurantName);
   const restaurantId = restaurant?.id ?? normalizeRestaurantSlug(input.restaurantId);
   const deckId = normalizeDeckId(input.deckId ?? restaurant?.activeDeck);
-  const batch: BoardBatch = {
+  const batch = createOperationalBatch({
     id,
     restaurantId,
-    gameId: input.gameId ?? "loteria",
+    gameId: input.gameId,
     deckId,
     restaurantName: restaurant?.name ?? input.restaurantName,
     name: input.name,
@@ -281,9 +317,7 @@ export function createBoardBatch(input: {
     status: input.activate ?? true ? "active" : "inactive",
     validFrom: input.validFrom,
     validTo: input.validTo,
-    boards: createBoardsForBatch(id, restaurantId, input.quantity, deckId),
-    createdAt: new Date().toISOString(),
-  };
+  });
   const currentBatches = getBoardBatches();
   const nextBatches =
     batch.status === "active"
@@ -298,6 +332,62 @@ export function createBoardBatch(input: {
 
   saveBoardBatches([batch, ...nextBatches]);
   return batch;
+}
+
+export function ensureBoardBatchForSession(session: Session) {
+  const batches = getBoardBatches();
+  const existingBatch =
+    (session.batchId ? batches.find((batch) => batch.id === session.batchId) : undefined) ??
+    batches.find(
+      (batch) =>
+        batch.restaurantId === session.restaurantId &&
+        batch.deckId === session.deckId &&
+        batch.status === "active",
+    );
+
+  if (existingBatch) {
+    return existingBatch;
+  }
+
+  const restaurant = getRestaurantById(session.restaurantId);
+  const allowedQuantity =
+    restaurant?.allowedTableCounts
+      ?.slice()
+      .sort((left, right) => left - right)
+      .find((count) => count >= session.activeTables) ?? session.activeTables;
+  const quantity = Math.max(session.activeTables, allowedQuantity, 30);
+  const batchId = session.batchId ?? `batch-${session.restaurantId}-${session.deckId}-auto`;
+  const generatedBatch = createOperationalBatch({
+    id: batchId,
+    restaurantId: session.restaurantId,
+    restaurantName: restaurant?.name ?? session.restaurantName,
+    name: `Lote operativo ${restaurant?.name ?? session.restaurantName}`,
+    gameId: "loteria",
+    deckId: session.deckId,
+    quantity,
+    status: "active",
+    createdAt: session.createdAt,
+  });
+  const nextBatches = [
+    generatedBatch,
+    ...batches.map((batch) =>
+      batch.restaurantId === generatedBatch.restaurantId &&
+      batch.deckId === generatedBatch.deckId &&
+      batch.status === "active"
+        ? { ...batch, status: "inactive" as const }
+        : batch,
+    ),
+  ];
+
+  saveBoardBatches(nextBatches);
+  console.info("[HOSTER LIVE][TABLAS] lote generado para sesion", {
+    restaurantId: session.restaurantId,
+    sessionId: session.id,
+    batchId,
+    deckId: session.deckId,
+    quantity,
+  });
+  return generatedBatch;
 }
 
 export function activateBoardBatch(batchId: string) {

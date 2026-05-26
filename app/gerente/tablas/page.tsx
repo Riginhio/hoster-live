@@ -23,7 +23,9 @@ import {
 } from "@/lib/loteria";
 import { generateBoardsPdf } from "@/lib/pdf/generateBoardsPdf";
 import {
+  ensureBoardBatchForSession,
   getBoardBatches,
+  refreshBoardBatchesFromSupabase,
   toLoteriaBoards,
   type BoardBatch,
 } from "@/lib/boards/boardBatchStorage";
@@ -79,11 +81,11 @@ export default function GerenteTablasPage() {
 
     async function syncTablesState(remoteOverride?: Session | null) {
       const restaurantId = currentUser?.restaurantId;
-      const refreshedRestaurants = await refreshRestaurantsFromSupabase();
+      const [refreshedRestaurants, refreshedBatches] = await Promise.all([
+        refreshRestaurantsFromSupabase(),
+        refreshBoardBatchesFromSupabase(),
+      ]);
       const restaurant = refreshedRestaurants.restaurants.find((item) => item.id === restaurantId);
-      const restaurantBatches = getBoardBatches().filter((batch) =>
-        restaurantId ? batch.restaurantId === restaurantId : true,
-      );
       const remoteResult = restaurantId
         ? await getLatestRealtimeSessionByRestaurantId(restaurantId)
         : null;
@@ -96,23 +98,32 @@ export default function GerenteTablasPage() {
       const localSession = activeSession ?? latestLocalSession ?? null;
       const nextSession = chooseNewestSession(remoteSession, localSession);
       const source = remoteSession && nextSession?.id === remoteSession.id ? "Supabase" : refreshedRestaurants.source;
+      const ensuredBatch = nextSession ? ensureBoardBatchForSession(nextSession) : null;
+      const restaurantBatches = getBoardBatches().filter((batch) =>
+        restaurantId ? batch.restaurantId === restaurantId : true,
+      );
+      const allRestaurantBatches =
+        ensuredBatch && !restaurantBatches.some((batch) => batch.id === ensuredBatch.id)
+          ? [ensuredBatch, ...restaurantBatches]
+          : restaurantBatches;
       const defaultBatch =
+        ensuredBatch ??
         (nextSession?.batchId
-          ? restaurantBatches.find((batch) => batch.id === nextSession.batchId)
+          ? allRestaurantBatches.find((batch) => batch.id === nextSession.batchId)
           : undefined) ??
-        restaurantBatches.find(
+        allRestaurantBatches.find(
           (batch) =>
             batch.status === "active" &&
             (!nextSession || batch.deckId === nextSession.deckId),
         ) ??
-        restaurantBatches[0] ??
+        allRestaurantBatches[0] ??
         null;
 
       if (!isMounted) {
         return;
       }
 
-      setBatches(restaurantBatches);
+      setBatches(allRestaurantBatches);
       setSession(nextSession);
       setLatestRemoteSession(remoteSession);
       setEnabledDecks((restaurant?.enabledDecks?.length ? restaurant.enabledDecks : ["loteria"]) as DeckId[]);
@@ -122,7 +133,10 @@ export default function GerenteTablasPage() {
         restaurantId,
         enabledDecks: restaurant?.enabledDecks,
         activeGames: restaurant?.activeGames,
+        batchesSource: refreshedBatches.source,
+        batchCount: allRestaurantBatches.length,
         latestSessionId: nextSession?.id,
+        latestSessionBatchId: nextSession?.batchId,
         latestSessionDeckId: nextSession?.deckId,
         updatedAt: nextSession?.lastUpdatedAt,
         drawnCardsCount: nextSession?.calledCards.length ?? 0,
@@ -133,7 +147,7 @@ export default function GerenteTablasPage() {
         setSelectedGameId(defaultBatch.gameId);
         setSelectedDeckId(defaultBatch.deckId);
         setSelectedBatchId((currentId) =>
-          !activeSession && currentId && restaurantBatches.some((batch) => batch.id === currentId)
+          !activeSession && currentId && allRestaurantBatches.some((batch) => batch.id === currentId)
             ? currentId
             : defaultBatch.id,
         );

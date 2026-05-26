@@ -38,6 +38,7 @@ import {
 } from "@/lib/sessions/sessionStorage";
 import {
   getActiveBoardBatchByDeck,
+  ensureBoardBatchForSession,
   getBoardBatches,
   toLoteriaBoards,
   type BoardBatch,
@@ -119,10 +120,10 @@ function getPlayElapsedSeconds(session: Session | null) {
 
 function getBatchForSession(session: Session) {
   if (session.batchId) {
-    return getBoardBatches().find((batch) => batch.id === session.batchId) ?? null;
+    return getBoardBatches().find((batch) => batch.id === session.batchId) ?? ensureBoardBatchForSession(session);
   }
 
-  return getActiveBoardBatchByDeck(session.restaurantId, session.deckId) ?? null;
+  return getActiveBoardBatchByDeck(session.restaurantId, session.deckId) ?? ensureBoardBatchForSession(session);
 }
 
 function getWinnerFromSession(session: Session | null): WinnerState | null {
