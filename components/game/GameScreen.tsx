@@ -33,11 +33,17 @@ import {
 } from "@/lib/boards/boardBatchStorage";
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
 import {
-  getStoredAudioEnabled,
-  playGameTone,
-  setStoredAudioEnabled,
-  unlockGameAudio,
-} from "@/lib/audio/gameAudio";
+  getStoredTvAudioEnabled,
+  getStoredTvAudioVolume,
+  playTvSound,
+  preloadTvAudio,
+  setStoredTvAudioEnabled,
+  setStoredTvAudioVolume,
+  startStandbyAudio,
+  stopStandbyAudio,
+  stopTvAudio,
+  unlockTvAudio,
+} from "@/lib/audio/tvAudio";
 import { getSupabaseClientDebugStatus, getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
   getActiveRealtimeSessionByRestaurantId,
@@ -140,6 +146,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [countdownRemaining, setCountdownRemaining] = useState(0);
   const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(0.8);
   const [realtimeSession, setRealtimeSession] = useState<Session | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<"connected" | "supabase-polling" | "empty" | "disconnected" | "fallback">("fallback");
   const [channelStatus, setChannelStatus] = useState<RestaurantSessionChannelStatus | "NO_CLIENT">("NO_CLIENT");
@@ -160,6 +167,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const activeSessionRef = useRef<Session | null>(null);
   const realtimeSessionRef = useRef<Session | null>(null);
   const audioEnabledRef = useRef(false);
+  const previousAutoplayStatusRef = useRef<Session["autoplayStatus"] | undefined>(undefined);
+  const previousCountdownSecondRef = useRef<number | null>(null);
   const supabaseStatus = getSupabaseConfigStatus();
   const supabaseDebugStatus = getSupabaseClientDebugStatus();
   const missingSupabaseVariables = supabaseStatus.missingVariables.join(", ");
@@ -259,10 +268,13 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
       sessionStatus,
       channelStatus,
     });
+    stopTvAudio();
     setLastEventReceived(`reconexion manual ${new Date().toLocaleTimeString("es-MX")}`);
     lastSyncSignatureRef.current = "";
     previousCalledCountRef.current = 0;
     previousWinnerFolioRef.current = undefined;
+    previousAutoplayStatusRef.current = undefined;
+    previousCountdownSecondRef.current = null;
     setActiveSession(null);
     setRealtimeSession(null);
     setCalledCards([]);
@@ -284,6 +296,66 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   useEffect(() => {
     audioEnabledRef.current = audioEnabled;
   }, [audioEnabled]);
+
+  useEffect(() => {
+    preloadTvAudio();
+    setAudioEnabled(getStoredTvAudioEnabled());
+    setAudioVolume(getStoredTvAudioVolume());
+  }, []);
+
+  useEffect(() => {
+    setStoredTvAudioVolume(audioVolume);
+
+    if (!audioEnabled) {
+      stopStandbyAudio();
+      return;
+    }
+
+    if (visualStatus === "idle") {
+      startStandbyAudio(true);
+      return;
+    }
+
+    stopStandbyAudio();
+  }, [audioEnabled, audioVolume, visualStatus]);
+
+  useEffect(() => {
+    if (!audioEnabled || visualStatus !== "countdown") {
+      previousCountdownSecondRef.current = null;
+      return;
+    }
+
+    const nextCountdownSecond = Math.ceil(countdownRemaining);
+
+    if (previousCountdownSecondRef.current === null) {
+      previousCountdownSecondRef.current = nextCountdownSecond;
+      return;
+    }
+
+    if (nextCountdownSecond < previousCountdownSecondRef.current) {
+      playTvSound("countdown", audioEnabledRef.current);
+    }
+
+    previousCountdownSecondRef.current = nextCountdownSecond;
+  }, [audioEnabled, countdownRemaining, visualStatus]);
+
+  useEffect(() => {
+    if (!activeSession?.id) {
+      previousAutoplayStatusRef.current = undefined;
+      return;
+    }
+
+    const previousAutoplayStatus = previousAutoplayStatusRef.current;
+    const nextAutoplayStatus = activeSession.autoplayStatus;
+
+    if (previousAutoplayStatus === "countdown" && nextAutoplayStatus === "playing") {
+      playTvSound("start", audioEnabledRef.current);
+    }
+
+    previousAutoplayStatusRef.current = nextAutoplayStatus;
+  }, [activeSession?.autoplayStatus, activeSession?.id]);
+
+  useEffect(() => () => stopTvAudio(), []);
 
   useEffect(() => {
     console.info("[HOSTER LIVE][TV] debug", {
@@ -357,6 +429,38 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
     return labels[visualStatus] ?? "En espera";
   }, [visualStatus]);
+
+  const audioControls = (
+    <div className="flex flex-col gap-3 rounded-lg border border-bone/10 bg-obsidian/55 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <label className="flex items-center gap-3 text-sm font-semibold text-bone/68">
+        <Volume2 size={18} />
+        <span>Volumen</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(audioVolume * 100)}
+          onChange={(event) => setAudioVolume(Number(event.target.value) / 100)}
+          className="h-2 w-36 cursor-pointer accent-mezcal"
+          aria-label="Volumen de audio"
+        />
+        <span className="min-w-10 text-right text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+          {Math.round(audioVolume * 100)}%
+        </span>
+      </label>
+      {audioEnabled ? (
+        <Button variant="secondary" onClick={disableAudio}>
+          <Volume2 size={18} />
+          Silenciar
+        </Button>
+      ) : (
+        <Button onClick={enableAudio}>
+          <VolumeX size={18} />
+          Activar sonido
+        </Button>
+      )}
+    </div>
+  );
 
   useEffect(() => {
     function syncSession() {
@@ -446,11 +550,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           }
 
           if (sessionIdChanged) {
+            stopTvAudio();
             setCalledCards([]);
             setWinner(null);
             setCountdownRemaining(0);
             previousCalledCountRef.current = 0;
             previousWinnerFolioRef.current = undefined;
+            previousAutoplayStatusRef.current = undefined;
+            previousCountdownSecondRef.current = null;
           }
 
           setActiveSession(reconciledSession);
@@ -476,11 +583,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
           if (!isCountdownSession && !sessionIdChanged) {
             if (reconciledSession.calledCards.length > previousCalledCountRef.current) {
-              playGameTone("card", audioEnabledRef.current);
+              playTvSound("card", audioEnabledRef.current);
             }
 
             if (reconciledSession.winnerFolio && reconciledSession.winnerFolio !== previousWinnerFolioRef.current) {
-              playGameTone("winner", audioEnabledRef.current);
+              playTvSound("winner", audioEnabledRef.current);
             }
           }
 
@@ -512,12 +619,15 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
         }
 
         lastSyncSignatureRef.current = "none";
+        stopTvAudio();
         setActiveSession(null);
         setRealtimeSession(null);
         setWinner(null);
         setCalledCards([]);
         previousCalledCountRef.current = 0;
         previousWinnerFolioRef.current = undefined;
+        previousAutoplayStatusRef.current = undefined;
+        previousCountdownSecondRef.current = null;
 
         const parsedConfig = parseStoredDemoConfig(
           localStorage.getItem(configStorageKey),
@@ -683,10 +793,6 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   }, [missingSupabaseVariables, realtimeRestaurantId, reconnectNonce, supabaseStatus.connected]);
 
   useEffect(() => {
-    setAudioEnabled(getStoredAudioEnabled());
-  }, []);
-
-  useEffect(() => {
     const updateElapsed = () => setPlayElapsedSeconds(getPlayElapsedSeconds(activeSession));
 
     updateElapsed();
@@ -703,12 +809,16 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   }, [activeSession]);
 
   async function enableAudio() {
-    const unlocked = await unlockGameAudio();
+    const unlocked = await unlockTvAudio();
     setAudioEnabled(unlocked);
+    if (unlocked) {
+      preloadTvAudio();
+    }
   }
 
   function disableAudio() {
-    setStoredAudioEnabled(false);
+    stopTvAudio();
+    setStoredTvAudioEnabled(false);
     setAudioEnabled(false);
   }
 
@@ -780,19 +890,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           }}
         >
           <div className="w-full max-w-6xl">
-            <div className="mb-5 flex justify-end">
-              {audioEnabled ? (
-                <Button variant="secondary" onClick={disableAudio}>
-                  <Volume2 size={18} />
-                  Sonido activo
-                </Button>
-              ) : (
-                <Button onClick={enableAudio}>
-                  <VolumeX size={18} />
-                  Activar sonido
-                </Button>
-              )}
-            </div>
+            <div className="mb-5">{audioControls}</div>
             <div className="mx-auto mb-8 flex w-fit items-center gap-3 rounded-lg border border-bone/10 bg-obsidian/60 px-4 py-3">
               {safeRestaurant.logoUrl ? (
                 <img
@@ -954,19 +1052,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
               ) : (
                 <p className="mt-5 text-xl font-semibold text-bone/62">{standbyCtaText}</p>
               )}
-              <div className="mt-6">
-                {audioEnabled ? (
-                  <Button variant="secondary" onClick={disableAudio}>
-                    <Volume2 size={18} />
-                    Sonido activo
-                  </Button>
-                ) : (
-                  <Button onClick={enableAudio}>
-                    <VolumeX size={18} />
-                    Activar sonido
-                  </Button>
-                )}
-              </div>
+              <div className="mt-6">{audioControls}</div>
             </div>
 
             <div className="grid gap-4">
@@ -1277,19 +1363,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             </section>
           ) : (
           <section className="flex min-h-[620px] flex-col items-center justify-center rounded-lg border border-mezcal/35 bg-[radial-gradient(circle_at_50%_20%,rgba(217,164,65,0.18),rgba(20,17,15,0.92)_48%,rgba(8,7,6,0.98)_100%)] p-5 text-center shadow-cantina">
-            <div className="mb-4">
-              {audioEnabled ? (
-                <Button variant="secondary" onClick={disableAudio}>
-                  <Volume2 size={18} />
-                  Sonido activo
-                </Button>
-              ) : (
-                <Button onClick={enableAudio}>
-                  <VolumeX size={18} />
-                  Activar sonido
-                </Button>
-              )}
-            </div>
+            <div className="mb-4">{audioControls}</div>
             <p className="mb-5 text-xs font-black uppercase tracking-[0.28em] text-mezcal">
                 {statusLabel}
               </p>
