@@ -1,6 +1,10 @@
 import type { QrCampaign } from "@/lib/types";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import {
+  getQrCampaignsFromSupabase,
+  upsertQrCampaignsToSupabase,
+} from "@/lib/supabase/persistence";
 
 export const qrCampaignsStorageKey = "hoster-live:qr-campaigns";
 
@@ -85,7 +89,7 @@ export function getQrCampaigns(): QrCampaign[] {
   const rawValue = window.localStorage.getItem(qrCampaignsStorageKey);
 
   if (!rawValue) {
-    saveQrCampaigns([defaultCampaign]);
+    saveQrCampaigns([defaultCampaign], { syncSupabase: false });
     return [defaultCampaign];
   }
 
@@ -95,21 +99,46 @@ export function getQrCampaigns(): QrCampaign[] {
       ? parsedValue.map(normalizeCampaign)
       : [defaultCampaign];
 
-    saveQrCampaigns(campaigns);
+    saveQrCampaigns(campaigns, { syncSupabase: false });
     return campaigns;
   } catch {
-    saveQrCampaigns([defaultCampaign]);
+    saveQrCampaigns([defaultCampaign], { syncSupabase: false });
     return [defaultCampaign];
   }
 }
 
-function saveQrCampaigns(campaigns: QrCampaign[]) {
+function saveQrCampaigns(
+  campaigns: QrCampaign[],
+  options: { syncSupabase?: boolean } = {},
+) {
   if (!hasLocalStorage()) {
     return campaigns;
   }
 
-  window.localStorage.setItem(qrCampaignsStorageKey, JSON.stringify(campaigns));
-  return campaigns;
+  const normalizedCampaigns = campaigns.map(normalizeCampaign);
+  window.localStorage.setItem(qrCampaignsStorageKey, JSON.stringify(normalizedCampaigns));
+  if (options.syncSupabase !== false) {
+    void upsertQrCampaignsToSupabase(normalizedCampaigns);
+  }
+  return normalizedCampaigns;
+}
+
+export async function refreshQrCampaignsFromSupabase() {
+  const result = await getQrCampaignsFromSupabase();
+
+  if (result.mode !== "supabase" || result.error || !result.data?.length) {
+    return {
+      campaigns: getQrCampaigns(),
+      source: "localStorage",
+      error: result.error,
+    };
+  }
+
+  return {
+    campaigns: saveQrCampaigns(result.data),
+    source: "Supabase",
+    error: null,
+  };
 }
 
 export function getActiveQrCampaignForRestaurant(

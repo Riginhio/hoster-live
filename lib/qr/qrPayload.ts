@@ -1,5 +1,7 @@
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 
+export const productionBaseUrl = "https://hosterlive.com";
+
 export type BoardValidationPayload = {
   restaurantId: string;
   restaurantName?: string;
@@ -63,7 +65,7 @@ export function decodeBoardValidationPayload(payload: string): BoardValidationPa
 export function createValidationUrl(payload: BoardValidationPayload, origin?: string) {
   const baseUrl =
     origin ??
-    (typeof window !== "undefined" && window.location.origin ? window.location.origin : "");
+    (typeof window !== "undefined" && window.location.origin ? window.location.origin : productionBaseUrl);
 
   return `${baseUrl}/validate/${encodeBoardValidationPayload(payload)}`;
 }

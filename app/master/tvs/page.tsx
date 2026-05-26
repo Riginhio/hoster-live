@@ -159,6 +159,11 @@ export default function MasterTvsPage() {
                 className="h-11 rounded-lg border border-bone/12 bg-bone/[0.045] px-3 text-bone outline-none transition placeholder:text-bone/30 focus:border-mezcal/70"
                 placeholder="URL de banner o imagen"
               />
+              <p className="rounded-lg border border-bone/10 bg-bone/[0.035] px-3 py-2 text-xs leading-5 text-bone/58">
+                Medidas recomendadas: Banner TV horizontal 1920 x 1080 px, promo lateral TV 600 x 1080 px,
+                imagen QR / marketing 1080 x 1080 px. Formatos permitidos: JPG, PNG, WEBP.
+                Evita texto muy pequeno y deja margen de seguridad.
+              </p>
               <select
                 value={row.control.durationSeconds}
                 onChange={(event) =>

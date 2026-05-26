@@ -8,8 +8,15 @@ import { BadgeCheck, ExternalLink, ShieldAlert } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { ButtonLink } from "@/components/ui/ButtonLink";
 import { Card } from "@/components/ui/Card";
-import { getBoardBatches, type BoardBatch } from "@/lib/boards/boardBatchStorage";
-import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
+import {
+  getBoardBatches,
+  refreshBoardBatchesFromSupabase,
+  type BoardBatch,
+} from "@/lib/boards/boardBatchStorage";
+import {
+  getActiveQrCampaignsForRestaurant,
+  refreshQrCampaignsFromSupabase,
+} from "@/lib/qr/qrCampaignStorage";
 import { decodeBoardValidationPayload, type BoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import type { QrCampaign, RestaurantConfig } from "@/lib/types";
@@ -33,7 +40,7 @@ function isWithinBatchValidity(batch: BoardBatch | null) {
   return (!validFrom || now >= validFrom) && (!validTo || now <= validTo);
 }
 
-function resolveValidation(payload: BoardValidationPayload | null) {
+function resolveValidation(payload: BoardValidationPayload | null, batches = getBoardBatches()) {
   if (!payload) {
     return {
       batch: null,
@@ -43,11 +50,11 @@ function resolveValidation(payload: BoardValidationPayload | null) {
   }
 
   const batch =
-    getBoardBatches().find(
+    batches.find(
       (item) => item.id === payload.batchId && item.restaurantId === payload.restaurantId,
     ) ?? null;
   const boardExists = Boolean(batch?.boards.some((board) => board.folio === payload.folio));
-  const isValid = Boolean(batch && boardExists && batch.status !== "archived" && isWithinBatchValidity(batch));
+  const isValid = Boolean(batch && boardExists && batch.status === "active" && isWithinBatchValidity(batch));
 
   return {
     batch,
@@ -65,20 +72,38 @@ export function ValidateClient({ payload }: ValidateClientProps) {
   const [boardExists, setBoardExists] = useState(false);
 
   useEffect(() => {
-    const validation = resolveValidation(decodedPayload);
-    setBatch(validation.batch);
-    setBoardExists(validation.boardExists);
-    setIsValid(validation.isValid);
-    setCampaigns(
-      decodedPayload ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId, "printed_qr") : [],
-    );
-    setRestaurant(decodedPayload ? getRestaurantById(decodedPayload.restaurantId) ?? null : null);
+    let isMounted = true;
+
+    async function loadValidation() {
+      const [batchResult] = await Promise.all([
+        refreshBoardBatchesFromSupabase(),
+        refreshQrCampaignsFromSupabase(),
+      ]);
+
+      if (!isMounted) {
+        return;
+      }
+
+      const validation = resolveValidation(decodedPayload, batchResult.batches);
+      setBatch(validation.batch);
+      setBoardExists(validation.boardExists);
+      setIsValid(validation.isValid);
+      setCampaigns(
+        decodedPayload ? getActiveQrCampaignsForRestaurant(decodedPayload.restaurantId, "printed_qr") : [],
+      );
+      setRestaurant(decodedPayload ? getRestaurantById(decodedPayload.restaurantId) ?? null : null);
+    }
+
+    void loadValidation();
+    return () => {
+      isMounted = false;
+    };
   }, [decodedPayload]);
 
   const restaurantName =
     restaurant?.name ?? batch?.restaurantName ?? decodedPayload?.restaurantName ?? "No disponible";
   const batchName = batch?.name ?? decodedPayload?.batchName ?? "No disponible";
-  const statusText = isValid ? "Valida" : "No valida";
+  const statusText = isValid ? "Valida" : "Esta tabla ya no esta activa";
 
   return (
     <main className="screen-safe cantina-grid bg-obsidian px-4 py-6">

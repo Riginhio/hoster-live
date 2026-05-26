@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Archive, CheckCircle2, Download, FileText, Plus } from "lucide-react";
+import { CheckCircle2, Download, FileText, Plus, Power } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -10,9 +10,10 @@ import type { RestaurantConfig } from "@/lib/types";
 import { decks, type DeckId, type GameId } from "@/lib/decks";
 import {
   activateBoardBatch,
-  archiveBoardBatch,
   createBoardBatch,
+  deactivateBoardBatch,
   getBoardBatches,
+  refreshBoardBatchesFromSupabase,
   toLoteriaBoards,
   type BoardBatch,
 } from "@/lib/boards/boardBatchStorage";
@@ -71,6 +72,7 @@ export default function MasterLotesPage() {
     const loadedRestaurants = getRestaurants();
     setRestaurants(loadedRestaurants);
     refreshBatches();
+    void refreshBoardBatchesFromSupabase().then((result) => setBatches(result.batches));
   }, []);
 
   useEffect(() => {
@@ -255,15 +257,19 @@ export default function MasterLotesPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  variant="secondary"
+                  variant={batch.status === "active" ? "danger" : "secondary"}
                   onClick={() => {
-                    activateBoardBatch(batch.id);
+                    if (batch.status === "active") {
+                      deactivateBoardBatch(batch.id);
+                    } else {
+                      activateBoardBatch(batch.id);
+                    }
                     refreshBatches();
                   }}
-                  disabled={batch.status === "active" || batch.status === "archived"}
+                  disabled={batch.status === "archived"}
                 >
-                  <CheckCircle2 size={16} />
-                  Activar
+                  {batch.status === "active" ? <Power size={16} /> : <CheckCircle2 size={16} />}
+                  {batch.status === "active" ? "Desactivar lote" : "Activar lote"}
                 </Button>
                 <Button variant="secondary" onClick={() => void exportBatchPdf(batch)}>
                   <Download size={16} />
@@ -272,17 +278,6 @@ export default function MasterLotesPage() {
                 <Button variant="secondary" onClick={() => void exportControlPdf(batch)}>
                   <FileText size={16} />
                   Hoja control
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    archiveBoardBatch(batch.id);
-                    refreshBatches();
-                  }}
-                  disabled={batch.status === "archived"}
-                >
-                  <Archive size={16} />
-                  Archivar
                 </Button>
               </div>
             </div>

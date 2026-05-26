@@ -299,7 +299,7 @@ function getBoardValidationUrl(board: LoteriaBoard, params: GenerateBoardsPdfPar
       batchName: params.batch?.name,
       folio: board.folio,
     },
-    typeof window !== "undefined" ? window.location.origin : "",
+    "https://hosterlive.com",
   );
 }
 

@@ -1,5 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase/client";
 import type { ManagerUser } from "@/lib/auth/managerUsersStorage";
+import type { BoardBatch } from "@/lib/boards/boardBatchStorage";
+import type { QrCampaign } from "@/lib/types";
 import type { RestaurantConfig } from "@/lib/types";
 import type { Session } from "@/lib/sessions/sessionStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
@@ -208,6 +210,112 @@ function managerUserPayload(user: ManagerUser) {
   };
 }
 
+function managerUserFromRow(row: Record<string, unknown>): ManagerUser {
+  const restaurantId = normalizeRestaurantSlug(String(row.restaurant_id ?? "rancho-viejo"));
+  const restaurantIds = asStringArray(row.restaurant_ids, [restaurantId]).map((id) =>
+    normalizeRestaurantSlug(id),
+  );
+
+  return {
+    id: String(row.id ?? ""),
+    username: String(row.username ?? "").trim().toLowerCase(),
+    password: String(row.password ?? ""),
+    name: String(row.name ?? ""),
+    restaurantId,
+    restaurantIds,
+    brandName: String(row.brand_name ?? ""),
+    role: row.role === "play" || row.role === "supervisor" ? row.role : "manager",
+    active: Boolean(row.active ?? true),
+    createdAt: String(row.created_at ?? new Date().toISOString()),
+  };
+}
+
+function boardBatchPayload(batch: BoardBatch) {
+  return {
+    id: batch.id,
+    restaurant_id: normalizeRestaurantSlug(batch.restaurantId),
+    game_id: batch.gameId,
+    deck_id: normalizeDeckId(batch.deckId),
+    restaurant_name: batch.restaurantName,
+    name: batch.name,
+    quantity: batch.quantity,
+    status: batch.status,
+    is_active: batch.status === "active",
+    active: batch.status === "active",
+    valid_from: batch.validFrom,
+    valid_to: batch.validTo,
+    boards: batch.boards,
+    created_at: batch.createdAt,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function boardBatchFromRow(row: Record<string, unknown>): BoardBatch {
+  const status = String(row.status ?? (row.is_active || row.active ? "active" : "inactive"));
+
+  return {
+    id: String(row.id ?? ""),
+    restaurantId: normalizeRestaurantSlug(String(row.restaurant_id ?? "rancho-viejo")),
+    gameId: String(row.game_id ?? "loteria") as BoardBatch["gameId"],
+    deckId: normalizeDeckId(String(row.deck_id ?? "loteria")),
+    restaurantName: String(row.restaurant_name ?? ""),
+    name: String(row.name ?? "Lote operativo"),
+    quantity: Number(row.quantity ?? 0),
+    status: status === "active" || status === "archived" ? status : "inactive",
+    validFrom: String(row.valid_from ?? ""),
+    validTo: String(row.valid_to ?? ""),
+    boards: Array.isArray(row.boards) ? (row.boards as BoardBatch["boards"]) : [],
+    createdAt: String(row.created_at ?? new Date().toISOString()),
+  };
+}
+
+function qrCampaignPayload(campaign: QrCampaign) {
+  return {
+    id: campaign.id,
+    name: campaign.name,
+    active: campaign.active,
+    channel: campaign.channel,
+    title: campaign.title,
+    message: campaign.message,
+    cta_label: campaign.ctaLabel,
+    cta_url: campaign.ctaUrl,
+    sponsor_name: campaign.sponsorName,
+    sponsor_logo_url: campaign.sponsorLogoUrl,
+    banner_image_url: campaign.bannerImageUrl,
+    valid_from: campaign.validFrom,
+    valid_to: campaign.validTo,
+    applies_to_restaurant_ids: campaign.appliesToRestaurantIds,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function qrCampaignFromRow(row: Record<string, unknown>): QrCampaign {
+  const appliesToRestaurantIds =
+    row.applies_to_restaurant_ids === "all"
+      ? "all"
+      : asStringArray(row.applies_to_restaurant_ids).map((id) => normalizeRestaurantSlug(id));
+
+  return {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? "Campana QR"),
+    active: Boolean(row.active ?? true),
+    channel:
+      row.channel === "tv_standby" || row.channel === "general"
+        ? row.channel
+        : "printed_qr",
+    title: String(row.title ?? ""),
+    message: String(row.message ?? ""),
+    ctaLabel: String(row.cta_label ?? ""),
+    ctaUrl: String(row.cta_url ?? ""),
+    sponsorName: String(row.sponsor_name ?? ""),
+    sponsorLogoUrl: String(row.sponsor_logo_url ?? ""),
+    bannerImageUrl: String(row.banner_image_url ?? ""),
+    validFrom: String(row.valid_from ?? ""),
+    validTo: String(row.valid_to ?? ""),
+    appliesToRestaurantIds,
+  };
+}
+
 function sessionPayload(session: Session) {
   return {
     id: session.id,
@@ -311,6 +419,25 @@ export async function upsertManagerUsersToSupabase(users: ManagerUser[]) {
   return { data: (data as ManagerUser[] | null) ?? null, error: error ? toError(error) : null, mode: "supabase" as const };
 }
 
+export async function getManagerUsersFromSupabase() {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return localResult<ManagerUser[]>();
+  }
+
+  const { data, error } = await supabase
+    .from("manager_users")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  return {
+    data: data ? (data as Record<string, unknown>[]).map(managerUserFromRow) : null,
+    error: error ? toError(error) : null,
+    mode: "supabase" as const,
+  };
+}
+
 export async function deleteManagerUserFromSupabase(userId: string) {
   const supabase = getSupabaseClient();
 
@@ -321,6 +448,82 @@ export async function deleteManagerUserFromSupabase(userId: string) {
   const { error } = await supabase.from("manager_users").delete().eq("id", userId);
 
   return { data: null, error: error ? toError(error) : null, mode: "supabase" as const };
+}
+
+export async function upsertBoardBatchesToSupabase(batches: BoardBatch[]) {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return localResult<BoardBatch[]>();
+  }
+
+  const { data, error } = await supabase.from("board_batches").upsert(
+    batches.map(boardBatchPayload),
+    { onConflict: "id" },
+  ).select();
+
+  return {
+    data: data ? (data as Record<string, unknown>[]).map(boardBatchFromRow) : null,
+    error: error ? toError(error) : null,
+    mode: "supabase" as const,
+  };
+}
+
+export async function getBoardBatchesFromSupabase() {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return localResult<BoardBatch[]>();
+  }
+
+  const { data, error } = await supabase
+    .from("board_batches")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  return {
+    data: data ? (data as Record<string, unknown>[]).map(boardBatchFromRow) : null,
+    error: error ? toError(error) : null,
+    mode: "supabase" as const,
+  };
+}
+
+export async function upsertQrCampaignsToSupabase(campaigns: QrCampaign[]) {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return localResult<QrCampaign[]>();
+  }
+
+  const { data, error } = await supabase.from("qr_campaigns").upsert(
+    campaigns.map(qrCampaignPayload),
+    { onConflict: "id" },
+  ).select();
+
+  return {
+    data: data ? (data as Record<string, unknown>[]).map(qrCampaignFromRow) : null,
+    error: error ? toError(error) : null,
+    mode: "supabase" as const,
+  };
+}
+
+export async function getQrCampaignsFromSupabase() {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return localResult<QrCampaign[]>();
+  }
+
+  const { data, error } = await supabase
+    .from("qr_campaigns")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  return {
+    data: data ? (data as Record<string, unknown>[]).map(qrCampaignFromRow) : null,
+    error: error ? toError(error) : null,
+    mode: "supabase" as const,
+  };
 }
 
 export async function upsertSessionToSupabase(session: Session) {

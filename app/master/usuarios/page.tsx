@@ -10,51 +10,84 @@ import type { RestaurantConfig } from "@/lib/types";
 import {
   deleteManagerUser,
   getManagerUsers,
+  refreshManagerUsersFromSupabase,
   toggleManagerUser,
   upsertManagerUser,
   type ManagerUser,
 } from "@/lib/auth/managerUsersStorage";
 
+const initialFormState = {
+  id: "",
+  username: "",
+  password: "",
+  name: "",
+  restaurantId: "rancho-viejo",
+  restaurantIds: ["rancho-viejo"],
+  brandName: "",
+  role: "manager" as "manager" | "play" | "supervisor",
+  active: true,
+};
+
 export default function MasterUsuariosPage() {
   const [restaurants, setRestaurants] = useState<RestaurantConfig[]>([]);
   const [users, setUsers] = useState<ManagerUser[]>([]);
-  const [formState, setFormState] = useState({
-    id: "",
-    username: "gerente@hosterlive.mx",
-    password: "Hoster123",
-    name: "Gerente",
-    restaurantId: "rancho-viejo",
-    restaurantIds: ["rancho-viejo"],
-    brandName: "",
-    role: "manager" as "manager" | "play" | "supervisor",
-    active: true,
-  });
+  const [formState, setFormState] = useState(initialFormState);
+  const [error, setError] = useState("");
 
   function refresh() {
-    setRestaurants(getRestaurants().filter((restaurant) => restaurant.isActive));
+    const activeRestaurants = getRestaurants().filter((restaurant) => restaurant.isActive);
+    setRestaurants(activeRestaurants);
     setUsers(getManagerUsers());
   }
 
   useEffect(() => {
     refresh();
+    void refreshManagerUsersFromSupabase().then((result) => setUsers(result.users));
   }, []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const normalizedUsername = formState.username.trim().toLowerCase();
+    const latestUsers = getManagerUsers();
+    const duplicateUser = latestUsers.find(
+      (user) => user.id !== formState.id && user.username.trim().toLowerCase() === normalizedUsername,
+    );
+
+    if (!normalizedUsername || !formState.password.trim() || !formState.name.trim()) {
+      setError("Nombre, usuario y password son obligatorios.");
+      return;
+    }
+
+    if (duplicateUser) {
+      setError("Este usuario ya existe. Usa otro nombre de usuario.");
+      return;
+    }
+
     const existingUser = users.find((user) => user.id === formState.id);
-    upsertManagerUser({
-      username: formState.username,
-      password: formState.password,
-      name: formState.name,
+    const savedUser = upsertManagerUser({
+      username: normalizedUsername,
+      password: formState.password.trim(),
+      name: formState.name.trim(),
       restaurantId: formState.restaurantId,
       restaurantIds:
         formState.role === "supervisor" ? formState.restaurantIds : [formState.restaurantId],
-      brandName: formState.brandName,
+      brandName: formState.brandName.trim(),
       id: formState.id || undefined,
       role: formState.role,
       active: existingUser?.active ?? formState.active,
     });
-    setFormState((current) => ({ ...current, id: "", active: true }));
+
+    if (!savedUser) {
+      setError("Este usuario ya existe. Usa otro nombre de usuario.");
+      return;
+    }
+
+    setError("");
+    setFormState({
+      ...initialFormState,
+      restaurantId: restaurants[0]?.id ?? "rancho-viejo",
+      restaurantIds: restaurants[0]?.id ? [restaurants[0].id] : ["rancho-viejo"],
+    });
     refresh();
   }
 
@@ -71,16 +104,11 @@ export default function MasterUsuariosPage() {
 
   function resetForm() {
     setFormState({
-      id: "",
-      username: "gerente@hosterlive.mx",
-      password: "Hoster123",
-      name: "Gerente",
+      ...initialFormState,
       restaurantId: restaurants[0]?.id ?? "rancho-viejo",
       restaurantIds: restaurants[0]?.id ? [restaurants[0].id] : ["rancho-viejo"],
-      brandName: "",
-      role: "manager",
-      active: true,
     });
+    setError("");
   }
 
   return (
@@ -93,7 +121,7 @@ export default function MasterUsuariosPage() {
             </div>
             <div>
               <h2 className="font-display text-2xl text-bone">Alta rapida</h2>
-              <p className="text-sm text-bone/50">Login mock por restaurante</p>
+              <p className="text-sm text-bone/50">Login operativo por restaurante</p>
             </div>
           </div>
           <form onSubmit={handleSubmit} className="space-y-3">
@@ -171,6 +199,7 @@ export default function MasterUsuariosPage() {
               <Plus size={16} />
               {formState.id ? "Actualizar usuario" : "Guardar usuario"}
             </Button>
+            {error ? <p className="text-sm font-semibold text-[#ff9b91]">{error}</p> : null}
             {formState.id ? (
               <Button type="button" variant="secondary" className="w-full" onClick={resetForm}>
                 <X size={16} />

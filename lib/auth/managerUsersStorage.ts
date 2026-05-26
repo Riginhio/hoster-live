@@ -1,6 +1,7 @@
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 import {
   deleteManagerUserFromSupabase,
+  getManagerUsersFromSupabase,
   upsertManagerUsersToSupabase,
 } from "@/lib/supabase/persistence";
 
@@ -77,9 +78,37 @@ export function saveManagerUsers(users: ManagerUser[]) {
   return users;
 }
 
+export async function refreshManagerUsersFromSupabase() {
+  const result = await getManagerUsersFromSupabase();
+
+  if (result.mode !== "supabase" || result.error || !result.data) {
+    return {
+      users: getManagerUsers(),
+      source: "localStorage",
+      error: result.error,
+    };
+  }
+
+  return {
+    users: saveManagerUsers(result.data),
+    source: "Supabase",
+    error: null,
+  };
+}
+
 export function upsertManagerUser(user: Partial<ManagerUser> & Pick<ManagerUser, "username" | "restaurantId">) {
   const users = getManagerUsers();
   const normalizedUser = normalizeUser(user);
+  const duplicateUser = users.find(
+    (currentUser) =>
+      currentUser.id !== normalizedUser.id &&
+      currentUser.username.trim().toLowerCase() === normalizedUser.username,
+  );
+
+  if (duplicateUser) {
+    return undefined;
+  }
+
   saveManagerUsers([
     normalizedUser,
     ...users.filter((currentUser) => currentUser.id !== normalizedUser.id),

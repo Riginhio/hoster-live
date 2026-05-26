@@ -9,6 +9,7 @@ import { getRestaurants } from "@/lib/restaurants/restaurantStorage";
 import {
   createQrCampaign,
   getQrCampaigns,
+  refreshQrCampaignsFromSupabase,
   toggleQrCampaign,
   updateQrCampaign,
 } from "@/lib/qr/qrCampaignStorage";
@@ -88,6 +89,7 @@ export default function MasterQrCampaignsPage() {
     setRestaurants(loadedRestaurants);
     setFormState(emptyForm(loadedRestaurants));
     refreshCampaigns();
+    void refreshQrCampaignsFromSupabase().then((result) => setCampaigns(result.campaigns));
   }, []);
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -253,6 +255,11 @@ export default function MasterQrCampaignsPage() {
               }
               className="text-sm font-semibold text-bone/60 file:mr-3 file:h-9 file:rounded-lg file:border-0 file:bg-mezcal file:px-3 file:text-sm file:font-black file:text-obsidian"
             />
+            <p className="rounded-lg border border-bone/10 bg-bone/[0.035] px-3 py-2 text-xs leading-5 text-bone/58">
+              Medidas recomendadas: Banner TV horizontal 1920 x 1080 px, promo lateral TV 600 x 1080 px,
+              imagen QR / marketing 1080 x 1080 px. Formatos permitidos: JPG, PNG, WEBP.
+              Evita texto muy pequeno y deja margen de seguridad.
+            </p>
             <input
               value={formState.bannerImageUrl}
               onChange={(event) => setField("bannerImageUrl", event.target.value)}
@@ -376,6 +383,10 @@ export default function MasterQrCampaignsPage() {
                 <p className="mt-2 text-lg font-bold text-bone">{campaign.title}</p>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-bone/58">
                   {campaign.message}
+                </p>
+                <p className="mt-2 text-xs font-semibold text-mezcal">
+                  QR dinamico: https://hosterlive.com/promo?restaurantId=
+                  {campaign.appliesToRestaurantIds === "all" ? "rancho-viejo" : campaign.appliesToRestaurantIds[0]}
                 </p>
                 <div className="mt-3 grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-bone/42 md:grid-cols-4">
                   <p>{campaign.validFrom || "Sin inicio"}</p>

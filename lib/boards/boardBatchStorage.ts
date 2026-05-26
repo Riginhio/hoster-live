@@ -6,6 +6,10 @@ import { getDeckCards, normalizeDeckId, type DeckId, type GameId } from "@/lib/d
 import { encodeBoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import {
+  getBoardBatchesFromSupabase,
+  upsertBoardBatchesToSupabase,
+} from "@/lib/supabase/persistence";
 
 export type BoardBatchStatus = "active" | "inactive" | "archived";
 
@@ -183,7 +187,7 @@ export function getBoardBatches(): BoardBatch[] {
   const rawValue = window.localStorage.getItem(boardBatchesStorageKey);
 
   if (!rawValue) {
-    saveBoardBatches(defaultBoardBatches);
+    saveBoardBatches(defaultBoardBatches, { syncSupabase: false });
     return defaultBoardBatches;
   }
 
@@ -192,21 +196,46 @@ export function getBoardBatches(): BoardBatch[] {
     const batches = Array.isArray(parsedValue)
       ? mergeDefaultBatches(parsedValue.map(normalizeBatch))
       : defaultBoardBatches;
-    saveBoardBatches(batches);
+    saveBoardBatches(batches, { syncSupabase: false });
     return batches;
   } catch {
-    saveBoardBatches(defaultBoardBatches);
+    saveBoardBatches(defaultBoardBatches, { syncSupabase: false });
     return defaultBoardBatches;
   }
 }
 
-export function saveBoardBatches(batches: BoardBatch[]) {
+export function saveBoardBatches(
+  batches: BoardBatch[],
+  options: { syncSupabase?: boolean } = {},
+) {
   if (!hasLocalStorage()) {
     return batches;
   }
 
-  window.localStorage.setItem(boardBatchesStorageKey, JSON.stringify(batches));
-  return batches;
+  const normalizedBatches = batches.map(normalizeBatch);
+  window.localStorage.setItem(boardBatchesStorageKey, JSON.stringify(normalizedBatches));
+  if (options.syncSupabase !== false) {
+    void upsertBoardBatchesToSupabase(normalizedBatches);
+  }
+  return normalizedBatches;
+}
+
+export async function refreshBoardBatchesFromSupabase() {
+  const result = await getBoardBatchesFromSupabase();
+
+  if (result.mode !== "supabase" || result.error || !result.data?.length) {
+    return {
+      batches: getBoardBatches(),
+      source: "localStorage",
+      error: result.error,
+    };
+  }
+
+  return {
+    batches: saveBoardBatches(result.data),
+    source: "Supabase",
+    error: null,
+  };
 }
 
 export function getActiveBoardBatch(restaurantId: string) {
@@ -302,6 +331,15 @@ export function activateBoardBatch(batchId: string) {
 export function archiveBoardBatch(batchId: string) {
   const updatedBatches = getBoardBatches().map((batch) =>
     batch.id === batchId ? { ...batch, status: "archived" as const } : batch,
+  );
+
+  saveBoardBatches(updatedBatches);
+  return updatedBatches.find((batch) => batch.id === batchId);
+}
+
+export function deactivateBoardBatch(batchId: string) {
+  const updatedBatches = getBoardBatches().map((batch) =>
+    batch.id === batchId ? { ...batch, status: "inactive" as const } : batch,
   );
 
   saveBoardBatches(updatedBatches);
