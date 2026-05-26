@@ -15,7 +15,7 @@ export type Session = {
   restaurantName: string;
   operatorUserId?: string;
   operatorUsername?: string;
-  operatorRole?: "manager" | "play" | "supervisor";
+  operatorRole?: "restaurant_admin" | "manager" | "play" | "supervisor" | "tv";
   createdAt: string;
   startedAt: string;
   endedAt?: string;

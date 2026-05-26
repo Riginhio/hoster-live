@@ -50,7 +50,7 @@ export type RealtimeGameSession = {
   active_promotions: Session["activePromotions"];
   operator_user_id: string | null;
   operator_username: string | null;
-  operator_role: "manager" | "play" | "supervisor" | null;
+  operator_role: "restaurant_admin" | "manager" | "play" | "supervisor" | "tv" | null;
   duration_seconds: number;
   last_updated_at: string;
   created_at: string;

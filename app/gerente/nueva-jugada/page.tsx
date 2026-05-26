@@ -26,7 +26,10 @@ import {
 import { getActiveQrCampaignsForRestaurant } from "@/lib/qr/qrCampaignStorage";
 import { closeRealtimeSession, createRealtimeSession } from "@/lib/supabase/sessionRealtime";
 import type { DeckId } from "@/lib/decks";
-import { getActiveBoardBatchByDeck } from "@/lib/boards/boardBatchStorage";
+import {
+  ensureActiveBoardBatchForRestaurant,
+  getActiveBoardBatchByDeck,
+} from "@/lib/boards/boardBatchStorage";
 import { preloadDeckImages } from "@/lib/decks/preloadImages";
 
 const modeLabels: Record<WinMode, string> = {
@@ -97,8 +100,10 @@ export default function NuevaJugadaPage() {
     [config.restaurantId, restaurants],
   );
   const selectedActiveBatch = useMemo(
-    () => getActiveBoardBatchByDeck(selectedRestaurant.id, selectedDeckId) ?? null,
-    [selectedDeckId, selectedRestaurant.id],
+    () =>
+      getActiveBoardBatchByDeck(selectedRestaurant.id, selectedDeckId) ??
+      ensureActiveBoardBatchForRestaurant(selectedRestaurant, selectedDeckId, config.activeTables),
+    [config.activeTables, selectedDeckId, selectedRestaurant],
   );
 
   useEffect(() => {

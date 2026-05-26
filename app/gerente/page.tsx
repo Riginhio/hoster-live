@@ -15,6 +15,7 @@ import { calculateFinancialBreakdown } from "@/lib/finance";
 import {
   getActiveBoardBatch,
   getActiveBoardBatchByDeck,
+  ensureActiveBoardBatchForRestaurant,
   type BoardBatch,
 } from "@/lib/boards/boardBatchStorage";
 import { refreshRestaurantsFromSupabase } from "@/lib/restaurants/restaurantStorage";
@@ -152,7 +153,7 @@ export default function GerentePage() {
       }
 
       setRestaurants(loadedRestaurants);
-      setActiveBatch(restaurant ? getActiveBoardBatch(restaurant.id) ?? null : null);
+      setActiveBatch(restaurant ? getActiveBoardBatch(restaurant.id) ?? ensureActiveBoardBatchForRestaurant(restaurant) : null);
       setLastConfig(restaurant ? getLastGameConfig(restaurant.id) : null);
       console.info("[HOSTER LIVE][GERENTE] debug", {
         user: currentUser?.email ?? currentUser?.name,
@@ -244,7 +245,9 @@ export default function GerentePage() {
     }
 
     const nextDraft = getDraftConfig(restaurant, activeTables);
-    const deckBatch = getActiveBoardBatchByDeck(restaurant.id, nextDraft.deckId);
+    const deckBatch =
+      getActiveBoardBatchByDeck(restaurant.id, nextDraft.deckId) ??
+      ensureActiveBoardBatchForRestaurant(restaurant, nextDraft.deckId, activeTables);
 
     if (!deckBatch) {
       setFeedback("No hay lote activo para el deck seleccionado.");
@@ -260,7 +263,9 @@ export default function GerentePage() {
       return;
     }
 
-    const deckBatch = getActiveBoardBatchByDeck(restaurant.id, draftGame.deckId);
+    const deckBatch =
+      getActiveBoardBatchByDeck(restaurant.id, draftGame.deckId) ??
+      ensureActiveBoardBatchForRestaurant(restaurant, draftGame.deckId, draftGame.activeTables);
 
     if (!deckBatch) {
       setFeedback("No hay lote activo para el deck seleccionado.");
@@ -373,7 +378,9 @@ export default function GerentePage() {
       return;
     }
 
-    const deckBatch = getActiveBoardBatchByDeck(restaurant.id, restaurant.activeDeck);
+    const deckBatch =
+      getActiveBoardBatchByDeck(restaurant.id, restaurant.activeDeck) ??
+      ensureActiveBoardBatchForRestaurant(restaurant, restaurant.activeDeck, restaurant.accumulatedTableCount);
     const activeTables = restaurant.accumulatedTableCount;
 
     if (!deckBatch) {
@@ -613,7 +620,10 @@ export default function GerentePage() {
                         disabled={isStartingGame}
                         onClick={() => {
                           setDraftGame((current) => current && { ...current, deckId });
-                          setActiveBatch(getActiveBoardBatchByDeck(restaurant.id, deckId) ?? null);
+                          setActiveBatch(
+                            getActiveBoardBatchByDeck(restaurant.id, deckId) ??
+                              ensureActiveBoardBatchForRestaurant(restaurant, deckId),
+                          );
                         }}
                         className={`h-14 rounded-lg border px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
                           draftGame.deckId === deckId

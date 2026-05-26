@@ -224,7 +224,13 @@ function managerUserFromRow(row: Record<string, unknown>): ManagerUser {
     restaurantId,
     restaurantIds,
     brandName: String(row.brand_name ?? ""),
-    role: row.role === "play" || row.role === "supervisor" ? row.role : "manager",
+    role:
+      row.role === "restaurant_admin" ||
+      row.role === "play" ||
+      row.role === "supervisor" ||
+      row.role === "tv"
+        ? row.role
+        : "manager",
     active: Boolean(row.active ?? true),
     createdAt: String(row.created_at ?? new Date().toISOString()),
   };

@@ -7,6 +7,7 @@ import { encodeBoardValidationPayload } from "@/lib/qr/qrPayload";
 import { getRestaurantById } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
 import type { Session } from "@/lib/sessions/sessionStorage";
+import type { RestaurantConfig } from "@/lib/types";
 import {
   getBoardBatchesFromSupabase,
   upsertBoardBatchesToSupabase,
@@ -388,6 +389,47 @@ export function ensureBoardBatchForSession(session: Session) {
     quantity,
   });
   return generatedBatch;
+}
+
+export function ensureActiveBoardBatchForRestaurant(
+  restaurant: RestaurantConfig,
+  deckId: DeckId = restaurant.activeDeck,
+  minimumQuantity?: number,
+) {
+  const existingBatch = getActiveBoardBatchByDeck(restaurant.id, deckId);
+
+  if (existingBatch) {
+    return existingBatch;
+  }
+
+  const allowedQuantity =
+    restaurant.allowedTableCounts
+      ?.slice()
+      .sort((left, right) => left - right)
+      .find((count) => count >= (minimumQuantity ?? 0)) ??
+    restaurant.allowedTableCounts?.[0] ??
+    minimumQuantity ??
+    30;
+  const quantity = Math.max(allowedQuantity, minimumQuantity ?? 0, 30);
+  const batch = createOperationalBatch({
+    id: `batch-${restaurant.id}-${deckId}-auto`,
+    restaurantId: restaurant.id,
+    restaurantName: restaurant.name,
+    name: `Lote operativo ${restaurant.name}`,
+    gameId: "loteria",
+    deckId,
+    quantity,
+    status: "active",
+  });
+
+  saveBoardBatches([batch, ...getBoardBatches()]);
+  console.info("[HOSTER LIVE][LOTES] lote activo generado", {
+    restaurantId: restaurant.id,
+    batchId: batch.id,
+    deckId,
+    quantity,
+  });
+  return batch;
 }
 
 export function activateBoardBatch(batchId: string) {

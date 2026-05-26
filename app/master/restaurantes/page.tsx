@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Check, Gamepad2, Pencil, Plus, Power, Search, X } from "lucide-react";
+import { Check, Copy, Gamepad2, Pencil, Plus, Power, Search, X } from "lucide-react";
 import { clsx } from "clsx";
 import { Layout } from "@/components/layout/Layout";
 import { Card } from "@/components/ui/Card";
@@ -17,6 +17,7 @@ import {
   updateRestaurant,
 } from "@/lib/restaurants/restaurantStorage";
 import { normalizeRestaurantSlug } from "@/lib/restaurants/slug";
+import { upsertManagerUser } from "@/lib/auth/managerUsersStorage";
 
 type RestaurantFormState = {
   name: string;
@@ -76,6 +77,14 @@ type RestaurantFormState = {
   enabledGames: GameId[];
   activeGames: GameId[];
   enabledDecks: DeckId[];
+};
+
+type GeneratedCredential = {
+  label: string;
+  username: string;
+  password: string;
+  role: string;
+  route?: string;
 };
 
 const businessTypeOptions: Array<{ value: BusinessType; label: string }> = [
@@ -444,6 +453,7 @@ export default function RestaurantesPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formState, setFormState] = useState<RestaurantFormState>(emptyForm);
   const [formError, setFormError] = useState<string | undefined>();
+  const [generatedCredentials, setGeneratedCredentials] = useState<GeneratedCredential[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [businessTypeFilter, setBusinessTypeFilter] = useState<"all" | BusinessType>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -537,6 +547,56 @@ export default function RestaurantesPage() {
     setIsFormOpen(false);
     setEditingRestaurant(null);
     setFormError(undefined);
+  }
+
+  function createBaseUsersForRestaurant(restaurant: RestaurantConfig) {
+    const slug = normalizeRestaurantSlug(restaurant.slug || restaurant.id || restaurant.name);
+    const password = `${slug}123`;
+    const credentials: GeneratedCredential[] = [
+      {
+        label: "Super admin restaurante",
+        username: `admin@${slug}.mx`,
+        password,
+        role: "restaurant_admin",
+      },
+      {
+        label: "Pantalla TV",
+        username: `tv@${slug}.mx`,
+        password,
+        role: "tv",
+        route: `/tv/${slug}`,
+      },
+    ];
+
+    credentials.forEach((credential) => {
+      upsertManagerUser({
+        username: credential.username,
+        password: credential.password,
+        name: credential.label,
+        restaurantId: slug,
+        restaurantIds: [slug],
+        brandName: restaurant.name,
+        role: credential.role as "restaurant_admin" | "tv",
+        active: true,
+      });
+    });
+    setGeneratedCredentials(credentials);
+  }
+
+  function copyGeneratedCredentials() {
+    const text = generatedCredentials
+      .map((credential) =>
+        [
+          credential.label,
+          `usuario: ${credential.username}`,
+          `password: ${credential.password}`,
+          `rol: ${credential.role}`,
+          credential.route ? `ruta: ${credential.route}` : "",
+        ].filter(Boolean).join("\n"),
+      )
+      .join("\n\n");
+
+    void navigator.clipboard?.writeText(text);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -641,12 +701,16 @@ export default function RestaurantesPage() {
 
     if (editingRestaurant) {
       updateRestaurant(editingRestaurant.id, payload);
+      setGeneratedCredentials([]);
     } else {
-      createRestaurant(payload);
+      const createdRestaurant = createRestaurant(payload);
+      createBaseUsersForRestaurant(createdRestaurant);
     }
 
     refreshRestaurants();
-    closeForm();
+    if (editingRestaurant) {
+      closeForm();
+    }
   }
 
   function handleToggleRestaurant(restaurantId: string) {
@@ -705,6 +769,40 @@ export default function RestaurantesPage() {
           </Card>
         </div>
       </div>
+
+      {generatedCredentials.length ? (
+        <Card accent className="mb-4 border-agave/35 bg-agave/10">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.24em] text-agave">
+                Credenciales generadas
+              </p>
+              <h3 className="mt-2 font-display text-3xl text-bone">
+                Usuarios base del restaurante
+              </h3>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {generatedCredentials.map((credential) => (
+                  <div key={credential.username} className="rounded-lg border border-bone/10 bg-obsidian/45 p-3">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+                      {credential.label}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-bone">usuario: {credential.username}</p>
+                    <p className="text-sm font-semibold text-bone">password: {credential.password}</p>
+                    <p className="text-sm font-semibold text-bone">rol: {credential.role}</p>
+                    {credential.route ? (
+                      <p className="text-sm font-semibold text-bone">ruta: {credential.route}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <Button type="button" variant="secondary" onClick={copyGeneratedCredentials}>
+              <Copy size={16} />
+              Copiar credenciales
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="mb-4 bg-bone/[0.035]">
         <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_0.75fr_0.75fr]">

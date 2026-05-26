@@ -24,7 +24,7 @@ const initialFormState = {
   restaurantId: "rancho-viejo",
   restaurantIds: ["rancho-viejo"],
   brandName: "",
-  role: "manager" as "manager" | "play" | "supervisor",
+  role: "manager" as ManagerUser["role"],
   active: true,
 };
 
@@ -133,12 +133,14 @@ export default function MasterUsuariosPage() {
             />
             <select
               value={formState.role}
-              onChange={(event) => setFormState((current) => ({ ...current, role: event.target.value as "manager" | "play" | "supervisor" }))}
+              onChange={(event) => setFormState((current) => ({ ...current, role: event.target.value as ManagerUser["role"] }))}
               className="h-11 w-full rounded-lg border border-bone/10 bg-bone/[0.045] px-3 text-bone outline-none focus:border-mezcal"
             >
+              <option value="restaurant_admin">Restaurant Admin</option>
               <option value="manager">Manager</option>
               <option value="play">Play</option>
               <option value="supervisor">Supervisor / Grupo</option>
+              <option value="tv">TV</option>
             </select>
             {formState.role === "supervisor" ? (
               <input

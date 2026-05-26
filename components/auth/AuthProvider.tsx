@@ -56,10 +56,23 @@ function parseStoredUser(rawValue: string | null) {
       return toAuthUser(validUser);
     }
 
-    if (parsedValue.role === "gerente") {
+    if (parsedValue.role === "gerente" || parsedValue.role === "tv") {
       const managerUser = getManagerUsers().find(
         (user) => user.active && user.username === parsedValue.email,
       );
+
+      if (managerUser?.role === "tv") {
+        return {
+          email: managerUser.username,
+          role: "tv" as const,
+          name: managerUser.name,
+          restaurantId: managerUser.restaurantId,
+          restaurantIds: managerUser.restaurantIds,
+          brandName: managerUser.brandName,
+          venueRole: "tv" as const,
+          userId: managerUser.id,
+        };
+      }
 
       return managerUser
         ? {
@@ -118,10 +131,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (user) => user.active && user.username.toLowerCase() === normalizedEmail && user.password === password,
     );
 
-      if (managerUser) {
+    if (managerUser) {
+      const isTvUser = managerUser.role === "tv";
       const authUser: AuthUser = {
         email: managerUser.username,
-        role: "gerente",
+        role: isTvUser ? "tv" : "gerente",
         name: managerUser.name,
         restaurantId: managerUser.restaurantId,
         restaurantIds: managerUser.restaurantIds,
