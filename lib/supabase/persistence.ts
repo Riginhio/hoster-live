@@ -240,7 +240,9 @@ function managerUserFromRow(row: Record<string, unknown>): ManagerUser {
 function boardBatchPayload(batch: BoardBatch) {
   return {
     id: batch.id,
+    batch_id: batch.batchId ?? batch.id,
     restaurant_id: normalizeRestaurantSlug(batch.restaurantId),
+    restaurant_slug: normalizeRestaurantSlug(batch.restaurantId),
     game_id: batch.gameId,
     deck_id: normalizeDeckId(batch.deckId),
     restaurant_name: batch.restaurantName,
@@ -252,6 +254,7 @@ function boardBatchPayload(batch: BoardBatch) {
     valid_from: batch.validFrom,
     valid_to: batch.validTo,
     boards: batch.boards,
+    folios: batch.boards.map((board) => board.folio),
     created_at: batch.createdAt,
     updated_at: new Date().toISOString(),
   };
@@ -259,10 +262,13 @@ function boardBatchPayload(batch: BoardBatch) {
 
 function boardBatchFromRow(row: Record<string, unknown>): BoardBatch {
   const status = String(row.status ?? (row.is_active || row.active ? "active" : "inactive"));
+  const batchId = String(row.batch_id ?? row.id ?? "");
+  const restaurantId = normalizeRestaurantSlug(String(row.restaurant_id ?? row.restaurant_slug ?? "rancho-viejo"));
 
   return {
-    id: String(row.id ?? ""),
-    restaurantId: normalizeRestaurantSlug(String(row.restaurant_id ?? "rancho-viejo")),
+    id: String(row.id ?? batchId),
+    batchId,
+    restaurantId,
     gameId: String(row.game_id ?? "loteria") as BoardBatch["gameId"],
     deckId: normalizeDeckId(String(row.deck_id ?? "loteria")),
     restaurantName: String(row.restaurant_name ?? ""),

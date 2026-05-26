@@ -28,6 +28,7 @@ export type Board = {
 
 export type BoardBatch = {
   id: string;
+  batchId?: string;
   restaurantId: string;
   gameId: GameId;
   deckId: DeckId;
@@ -120,6 +121,7 @@ function createDefaultBatch(
 
   return {
     id,
+    batchId: id,
     restaurantId: slug,
     gameId: "loteria",
     deckId,
@@ -155,6 +157,7 @@ function createOperationalBatch(input: {
 
   return {
     id: input.id,
+    batchId: input.id,
     restaurantId: slug,
     gameId: input.gameId ?? "loteria",
     deckId: normalizeDeckId(input.deckId),
@@ -190,6 +193,7 @@ function normalizeBatch(batch: BoardBatch): BoardBatch {
 
   return {
     ...batch,
+    batchId: batch.batchId ?? batch.id,
     restaurantId,
     gameId: batch.gameId ?? "loteria",
     deckId,
@@ -209,35 +213,22 @@ function normalizeBatch(batch: BoardBatch): BoardBatch {
   };
 }
 
-function mergeDefaultBatches(batches: BoardBatch[]) {
-  const existingIds = new Set(batches.map((batch) => batch.id));
-  const missingDefaults = defaultBoardBatches.filter((batch) => !existingIds.has(batch.id));
-
-  return [...batches, ...missingDefaults];
-}
-
 export function getBoardBatches(): BoardBatch[] {
   if (!hasLocalStorage()) {
-    return defaultBoardBatches;
+    return [];
   }
 
   const rawValue = window.localStorage.getItem(boardBatchesStorageKey);
 
   if (!rawValue) {
-    saveBoardBatches(defaultBoardBatches, { syncSupabase: false });
-    return defaultBoardBatches;
+    return [];
   }
 
   try {
     const parsedValue = JSON.parse(rawValue) as BoardBatch[];
-    const batches = Array.isArray(parsedValue)
-      ? mergeDefaultBatches(parsedValue.map(normalizeBatch))
-      : defaultBoardBatches;
-    saveBoardBatches(batches, { syncSupabase: false });
-    return batches;
+    return Array.isArray(parsedValue) ? parsedValue.map(normalizeBatch) : [];
   } catch {
-    saveBoardBatches(defaultBoardBatches, { syncSupabase: false });
-    return defaultBoardBatches;
+    return [];
   }
 }
 
@@ -260,7 +251,7 @@ export function saveBoardBatches(
 export async function refreshBoardBatchesFromSupabase() {
   const result = await getBoardBatchesFromSupabase();
 
-  if (result.mode !== "supabase" || result.error || !result.data?.length) {
+  if (result.mode !== "supabase" || result.error || !result.data) {
     return {
       batches: getBoardBatches(),
       source: "localStorage",
@@ -269,7 +260,7 @@ export async function refreshBoardBatchesFromSupabase() {
   }
 
   return {
-    batches: saveBoardBatches(result.data),
+    batches: saveBoardBatches(result.data, { syncSupabase: false }),
     source: "Supabase",
     error: null,
   };
