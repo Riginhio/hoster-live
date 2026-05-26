@@ -18,7 +18,6 @@ import {
 import { getRestaurantById } from "@/lib/restaurants";
 import {
   getActiveSessionByRestaurantId,
-  getSessionById,
   hydrateSessionCards,
   type Session,
 } from "@/lib/sessions/sessionStorage";
@@ -141,6 +140,9 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const lastImageTimingRef = useRef("");
   const previousDeckIdRef = useRef<string | undefined>(undefined);
   const lastRuntimeWriteSignatureRef = useRef("");
+  const activeSessionRef = useRef<Session | null>(null);
+  const realtimeSessionRef = useRef<Session | null>(null);
+  const audioEnabledRef = useRef(false);
   const supabaseStatus = getSupabaseConfigStatus();
   const supabaseDebugStatus = getSupabaseClientDebugStatus();
   const missingSupabaseVariables = supabaseStatus.missingVariables.join(", ");
@@ -218,6 +220,18 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   }
 
   useEffect(() => {
+    activeSessionRef.current = activeSession;
+  }, [activeSession]);
+
+  useEffect(() => {
+    realtimeSessionRef.current = realtimeSession;
+  }, [realtimeSession]);
+
+  useEffect(() => {
+    audioEnabledRef.current = audioEnabled;
+  }, [audioEnabled]);
+
+  useEffect(() => {
     console.info("[HOSTER LIVE][TV] debug", {
       restaurantId: realtimeRestaurantId,
       activeSessionId,
@@ -292,17 +306,18 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   useEffect(() => {
     function syncSession() {
       try {
+        const currentRealtimeSession = realtimeSessionRef.current;
+        const currentActiveSession = activeSessionRef.current;
         const activeRestaurantSession =
-          realtimeSession?.status === "active"
-            ? realtimeSession
-            : getActiveSessionByRestaurantId(tvRestaurantId);
-        const currentStoredSession = activeSession?.id
-          ? getSessionById(activeSession.id)
-          : undefined;
-        const storedSession = activeRestaurantSession ?? currentStoredSession;
+          currentRealtimeSession?.status === "active"
+            ? currentRealtimeSession
+            : supabaseStatus.connected
+              ? null
+              : getActiveSessionByRestaurantId(tvRestaurantId);
+        const storedSession = activeRestaurantSession;
 
         if (storedSession) {
-          const previousSessionId = activeSession?.id;
+          const previousSessionId = currentActiveSession?.id;
           const syncSignature = getSessionSyncSignature(storedSession);
 
           if (
@@ -379,11 +394,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
           if (!isCountdownSession && !sessionIdChanged) {
             if (reconciledSession.calledCards.length > previousCalledCountRef.current) {
-              playGameTone("card", audioEnabled);
+              playGameTone("card", audioEnabledRef.current);
             }
 
             if (reconciledSession.winnerFolio && reconciledSession.winnerFolio !== previousWinnerFolioRef.current) {
-              playGameTone("winner", audioEnabled);
+              playGameTone("winner", audioEnabledRef.current);
             }
           }
 
@@ -438,14 +453,14 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     }
 
     syncSession();
-    const intervalId = globalThis.setInterval(syncSession, 900);
+    const intervalId = globalThis.setInterval(syncSession, 1000);
     window.addEventListener("storage", syncSession);
 
     return () => {
       globalThis.clearInterval(intervalId);
       window.removeEventListener("storage", syncSession);
     };
-  }, [activeSession?.id, activeSession?.lastUpdatedAt, audioEnabled, realtimeSession, tvRestaurantId]);
+  }, [supabaseStatus.connected, tvRestaurantId]);
 
   useEffect(() => {
     if (!supabaseStatus.connected) {
@@ -960,7 +975,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
             </span>
           </div>
           <div className="grid max-h-[56vh] gap-3 overflow-auto pr-1 sm:grid-cols-2 xl:grid-cols-1">
-            {[...calledCards].reverse().map((card, index) => {
+            {calledCards.slice(-10).reverse().map((card, index) => {
               const isLatest = index === 0;
 
               return (
