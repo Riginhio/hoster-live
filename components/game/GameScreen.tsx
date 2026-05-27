@@ -36,6 +36,7 @@ import {
   getStoredTvAudioEnabled,
   getStoredTvAudioVolume,
   playTvSound,
+  playTestSound,
   preloadTvAudio,
   setStoredTvAudioEnabled,
   setStoredTvAudioVolume,
@@ -146,7 +147,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   const [countdownRemaining, setCountdownRemaining] = useState(0);
   const [playElapsedSeconds, setPlayElapsedSeconds] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [audioVolume, setAudioVolume] = useState(0.8);
+  const [audioVolume, setAudioVolume] = useState(0.65);
+  const [audioFeedback, setAudioFeedback] = useState("");
   const [realtimeSession, setRealtimeSession] = useState<Session | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<"connected" | "supabase-polling" | "empty" | "disconnected" | "fallback">("fallback");
   const [channelStatus, setChannelStatus] = useState<RestaurantSessionChannelStatus | "NO_CLIENT">("NO_CLIENT");
@@ -333,6 +335,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     }
 
     if (nextCountdownSecond < previousCountdownSecondRef.current) {
+      console.warn("[HOSTER LIVE][TV] audio: countdown_tick");
       playTvSound("countdown", audioEnabledRef.current);
     }
 
@@ -349,6 +352,7 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
     const nextAutoplayStatus = activeSession.autoplayStatus;
 
     if (previousAutoplayStatus === "countdown" && nextAutoplayStatus === "playing") {
+      console.warn("[HOSTER LIVE][TV] audio: game_start");
       playTvSound("start", audioEnabledRef.current);
     }
 
@@ -431,34 +435,50 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   }, [visualStatus]);
 
   const audioControls = (
-    <div className="flex flex-col gap-3 rounded-lg border border-bone/10 bg-obsidian/55 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <label className="flex items-center gap-3 text-sm font-semibold text-bone/68">
-        <Volume2 size={18} />
-        <span>Volumen</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={Math.round(audioVolume * 100)}
-          onChange={(event) => setAudioVolume(Number(event.target.value) / 100)}
-          className="h-2 w-36 cursor-pointer accent-mezcal"
-          aria-label="Volumen de audio"
-        />
-        <span className="min-w-10 text-right text-xs font-black uppercase tracking-[0.18em] text-mezcal">
-          {Math.round(audioVolume * 100)}%
-        </span>
-      </label>
-      {audioEnabled ? (
-        <Button variant="secondary" onClick={disableAudio}>
+    <div className="grid gap-3 rounded-lg border border-bone/10 bg-obsidian/55 px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <label className="flex items-center gap-3 text-sm font-semibold text-bone/68">
           <Volume2 size={18} />
-          Silenciar
-        </Button>
-      ) : (
-        <Button onClick={enableAudio}>
-          <VolumeX size={18} />
-          Activar sonido
-        </Button>
-      )}
+          <span>Volumen</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(audioVolume * 100)}
+            onChange={(event) => setAudioVolume(Number(event.target.value) / 100)}
+            className="h-2 w-36 cursor-pointer accent-mezcal"
+            aria-label="Volumen de audio"
+          />
+          <span className="min-w-10 text-right text-xs font-black uppercase tracking-[0.18em] text-mezcal">
+            {Math.round(audioVolume * 100)}%
+          </span>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {audioEnabled ? (
+          <Button variant="secondary" onClick={disableAudio}>
+              <Volume2 size={18} />
+              Sonido activo
+            </Button>
+          ) : (
+            <Button onClick={enableAudio}>
+              <VolumeX size={18} />
+              Activar sonido
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              const played = await playTestSound(audioEnabled);
+              setAudioFeedback(played ? "Prueba de sonido ejecutada" : "No se pudo reproducir la prueba");
+            }}
+          >
+            Probar sonido
+          </Button>
+        </div>
+      </div>
+      {audioFeedback ? (
+        <p className="text-xs font-semibold text-bone/55">{audioFeedback}</p>
+      ) : null}
     </div>
   );
 
@@ -583,10 +603,12 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
           if (!isCountdownSession && !sessionIdChanged) {
             if (reconciledSession.calledCards.length > previousCalledCountRef.current) {
+              console.warn("[HOSTER LIVE][TV] audio: card_drawn");
               playTvSound("card", audioEnabledRef.current);
             }
 
             if (reconciledSession.winnerFolio && reconciledSession.winnerFolio !== previousWinnerFolioRef.current) {
+              console.warn("[HOSTER LIVE][TV] audio: winner");
               playTvSound("winner", audioEnabledRef.current);
             }
           }
@@ -810,16 +832,33 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
   async function enableAudio() {
     const unlocked = await unlockTvAudio();
-    setAudioEnabled(unlocked);
-    if (unlocked) {
-      preloadTvAudio();
+
+    if (!unlocked) {
+      setAudioEnabled(false);
+      setAudioFeedback("El navegador bloqueo el audio. Toca nuevamente Activar sonido.");
+      return;
     }
+
+    const testPlayed = await playTestSound(true);
+    if (!testPlayed) {
+      setAudioEnabled(false);
+      setStoredTvAudioEnabled(false);
+      setAudioFeedback("No se pudo activar sonido");
+      return;
+    }
+
+    preloadTvAudio();
+    setAudioEnabled(true);
+    setStoredTvAudioEnabled(true);
+    setStoredTvAudioVolume(audioVolume);
+    setAudioFeedback("Sonido activado");
   }
 
   function disableAudio() {
     stopTvAudio();
     setStoredTvAudioEnabled(false);
     setAudioEnabled(false);
+    setAudioFeedback("Sonido desactivado");
   }
 
   if (restaurantStatus === "loading") {

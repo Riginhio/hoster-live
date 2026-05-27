@@ -3,6 +3,11 @@ export const tvAudioVolumeStorageKey = "hoster-live:tv-audio-volume";
 
 export type TvAudioSound = "countdown" | "start" | "card" | "winner" | "standby";
 
+type BrowserAudioWindow = typeof globalThis & {
+  AudioContext?: typeof AudioContext;
+  webkitAudioContext?: typeof AudioContext;
+};
+
 type AudioMap = Record<TvAudioSound, string>;
 
 const soundSources: AudioMap = {
@@ -26,7 +31,7 @@ function hasAudioElement() {
 
 function clampVolume(volume: number) {
   if (!Number.isFinite(volume)) {
-    return 0.8;
+    return 0.65;
   }
 
   return Math.max(0, Math.min(1, volume));
@@ -73,11 +78,11 @@ export function setStoredTvAudioEnabled(enabled: boolean) {
 
 export function getStoredTvAudioVolume() {
   if (!hasLocalStorage()) {
-    return 0.8;
+    return 0.65;
   }
 
   const rawValue = window.localStorage.getItem(tvAudioVolumeStorageKey);
-  return clampVolume(rawValue ? Number(rawValue) : 0.8);
+  return clampVolume(rawValue ? Number(rawValue) : 0.65);
 }
 
 export function setStoredTvAudioVolume(volume: number) {
@@ -103,20 +108,61 @@ export function preloadTvAudio() {
 }
 
 export async function unlockTvAudio() {
-  const audio = ensureAudio("start");
-
-  if (!audio) {
+  if (!hasAudioElement()) {
     setStoredTvAudioEnabled(true);
     return true;
   }
 
   try {
-    audio.currentTime = 0;
-    audio.volume = 0;
-    await audio.play();
-    audio.pause();
-    audio.currentTime = 0;
-    audio.volume = getStoredTvAudioVolume();
+    const AudioContextClass =
+      typeof window !== "undefined"
+        ? (globalThis as BrowserAudioWindow).AudioContext ||
+          (globalThis as BrowserAudioWindow).webkitAudioContext
+        : undefined;
+
+    if (AudioContextClass) {
+      const context = new AudioContextClass();
+
+      if (context.state === "suspended") {
+        await context.resume();
+      }
+
+      const buffer = context.createBuffer(1, 1, 22050);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.start(0);
+      source.stop(0.02);
+      window.setTimeout(() => {
+        void context.close();
+      }, 80);
+    }
+
+    const audio = ensureAudio("start");
+    if (audio) {
+      audio.currentTime = 0;
+      audio.volume = 0.001;
+      await audio.play();
+      audio.pause();
+      audio.currentTime = 0;
+    }
+
+    const standby = ensureAudio("standby");
+    if (standby) {
+      standby.currentTime = 0;
+      standby.volume = 0.001;
+      await standby.play();
+      standby.pause();
+      standby.currentTime = 0;
+    }
+
+    (Object.keys(soundSources) as TvAudioSound[]).forEach((sound) => {
+      const nextAudio = ensureAudio(sound);
+      if (nextAudio) {
+        nextAudio.volume = getStoredTvAudioVolume();
+      }
+    });
+
     setStoredTvAudioEnabled(true);
     return true;
   } catch {
@@ -152,7 +198,32 @@ export function playTvSound(sound: Exclude<TvAudioSound, "standby">, enabled = g
     audio.pause();
     audio.currentTime = 0;
     audio.volume = getStoredTvAudioVolume();
-    void audio.play();
+    const playResult = audio.play();
+    if (playResult && typeof playResult.then === "function") {
+      void playResult.catch(() => undefined);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function playTestSound(enabled = getStoredTvAudioEnabled()) {
+  if (!enabled) {
+    return false;
+  }
+
+  const audio = ensureAudio("card");
+
+  if (!audio) {
+    return false;
+  }
+
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = getStoredTvAudioVolume();
+    await audio.play();
     return true;
   } catch {
     return false;
@@ -180,7 +251,10 @@ export function startStandbyAudio(enabled = getStoredTvAudioEnabled()) {
     standbyAudio.loop = true;
     standbyAudio.volume = getStoredTvAudioVolume() * 0.55;
     if (standbyAudio.paused) {
-      void standbyAudio.play();
+      const playResult = standbyAudio.play();
+      if (playResult && typeof playResult.then === "function") {
+        void playResult.catch(() => undefined);
+      }
     }
     return true;
   } catch {
