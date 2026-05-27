@@ -43,7 +43,6 @@ import {
   startStandbyAudio,
   stopStandbyAudio,
   stopTvAudio,
-  unlockTvAudio,
 } from "@/lib/audio/tvAudio";
 import { getSupabaseClientDebugStatus, getSupabaseConfigStatus } from "@/lib/supabase/client";
 import {
@@ -336,7 +335,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
     if (nextCountdownSecond < previousCountdownSecondRef.current) {
       console.warn("[HOSTER LIVE][TV] audio: countdown_tick");
-      playTvSound("countdown", audioEnabledRef.current);
+      void playTvSound("countdown", audioEnabledRef.current).then((result) => {
+        if (!result.ok) {
+          setAudioFeedback(`Error audio: ${result.error}`);
+        }
+      });
     }
 
     previousCountdownSecondRef.current = nextCountdownSecond;
@@ -353,7 +356,11 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
 
     if (previousAutoplayStatus === "countdown" && nextAutoplayStatus === "playing") {
       console.warn("[HOSTER LIVE][TV] audio: game_start");
-      playTvSound("start", audioEnabledRef.current);
+      void playTvSound("start", audioEnabledRef.current).then((result) => {
+        if (!result.ok) {
+          setAudioFeedback(`Error audio: ${result.error}`);
+        }
+      });
     }
 
     previousAutoplayStatusRef.current = nextAutoplayStatus;
@@ -468,8 +475,8 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           <Button
             variant="secondary"
             onClick={async () => {
-              const played = await playTestSound(audioEnabled);
-              setAudioFeedback(played ? "Prueba de sonido ejecutada" : "No se pudo reproducir la prueba");
+              const played = await playTestSound(true);
+              setAudioFeedback(played.ok ? "Prueba de sonido ejecutada" : `Error audio: ${played.error}`);
             }}
           >
             Probar sonido
@@ -604,12 +611,20 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
           if (!isCountdownSession && !sessionIdChanged) {
             if (reconciledSession.calledCards.length > previousCalledCountRef.current) {
               console.warn("[HOSTER LIVE][TV] audio: card_drawn");
-              playTvSound("card", audioEnabledRef.current);
+              void playTvSound("card", audioEnabledRef.current).then((result) => {
+                if (!result.ok) {
+                  setAudioFeedback(`Error audio: ${result.error}`);
+                }
+              });
             }
 
             if (reconciledSession.winnerFolio && reconciledSession.winnerFolio !== previousWinnerFolioRef.current) {
               console.warn("[HOSTER LIVE][TV] audio: winner");
-              playTvSound("winner", audioEnabledRef.current);
+              void playTvSound("winner", audioEnabledRef.current).then((result) => {
+                if (!result.ok) {
+                  setAudioFeedback(`Error audio: ${result.error}`);
+                }
+              });
             }
           }
 
@@ -831,19 +846,12 @@ export function GameScreen({ restaurantId }: GameScreenProps) {
   }, [activeSession]);
 
   async function enableAudio() {
-    const unlocked = await unlockTvAudio();
+    const testResult = await playTestSound(true);
 
-    if (!unlocked) {
-      setAudioEnabled(false);
-      setAudioFeedback("El navegador bloqueo el audio. Toca nuevamente Activar sonido.");
-      return;
-    }
-
-    const testPlayed = await playTestSound(true);
-    if (!testPlayed) {
+    if (!testResult.ok) {
       setAudioEnabled(false);
       setStoredTvAudioEnabled(false);
-      setAudioFeedback("No se pudo activar sonido");
+      setAudioFeedback(`Error audio: ${testResult.error}`);
       return;
     }
 

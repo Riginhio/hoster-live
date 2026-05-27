@@ -3,22 +3,36 @@ export const tvAudioVolumeStorageKey = "hoster-live:tv-audio-volume";
 
 export type TvAudioSound = "countdown" | "start" | "card" | "winner" | "standby";
 
-type BrowserAudioWindow = typeof globalThis & {
-  AudioContext?: typeof AudioContext;
-  webkitAudioContext?: typeof AudioContext;
+export type TvAudioPlayResult =
+  | { ok: true; source: string }
+  | { ok: false; error: string; source?: string };
+
+type SoundSources = Record<TvAudioSound, { mp3: string; wav: string }>;
+
+const soundSources: SoundSources = {
+  countdown: {
+    mp3: "/audio/countdown-tick.mp3",
+    wav: "/audio/countdown-tick.wav",
+  },
+  start: {
+    mp3: "/audio/game-start.mp3",
+    wav: "/audio/game-start.wav",
+  },
+  card: {
+    mp3: "/audio/card-cantada.mp3",
+    wav: "/audio/card-cantada.wav",
+  },
+  winner: {
+    mp3: "/audio/winner.mp3",
+    wav: "/audio/winner.wav",
+  },
+  standby: {
+    mp3: "/audio/standby-loop.mp3",
+    wav: "/audio/standby-loop.wav",
+  },
 };
 
-type AudioMap = Record<TvAudioSound, string>;
-
-const soundSources: AudioMap = {
-  countdown: "/audio/countdown-tick.wav",
-  start: "/audio/game-start.wav",
-  card: "/audio/card-cantada.wav",
-  winner: "/audio/winner.wav",
-  standby: "/audio/standby-loop.wav",
-};
-
-const soundCache = new Map<TvAudioSound, HTMLAudioElement>();
+const activeOneShotAudios = new Set<HTMLAudioElement>();
 let standbyAudio: HTMLAudioElement | null = null;
 
 function hasLocalStorage() {
@@ -37,27 +51,88 @@ function clampVolume(volume: number) {
   return Math.max(0, Math.min(1, volume));
 }
 
-function createAudioElement(sound: TvAudioSound) {
-  const audio = new Audio(soundSources[sound]);
+function formatAudioError(error: unknown) {
+  if (error instanceof DOMException) {
+    return `${error.name}: ${error.message}`;
+  }
+
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+
+  return typeof error === "string" ? error : "Error de audio desconocido";
+}
+
+function getSourceList(sound: TvAudioSound) {
+  const sources = soundSources[sound];
+  return [sources.mp3, sources.wav];
+}
+
+function trackOneShotAudio(audio: HTMLAudioElement) {
+  activeOneShotAudios.add(audio);
+  const cleanup = () => {
+    audio.removeEventListener("ended", cleanup);
+    audio.removeEventListener("error", cleanup);
+    activeOneShotAudios.delete(audio);
+  };
+
+  audio.addEventListener("ended", cleanup);
+  audio.addEventListener("error", cleanup);
+}
+
+function createAudioElement(source: string, volume: number, loop = false) {
+  const audio = new Audio(source);
   audio.preload = "auto";
   audio.crossOrigin = "anonymous";
-  audio.volume = getStoredTvAudioVolume();
+  audio.loop = loop;
+  audio.muted = false;
+  audio.volume = clampVolume(volume);
+  audio.load();
   return audio;
 }
 
-function ensureAudio(sound: TvAudioSound) {
-  if (!hasAudioElement()) {
-    return null;
+async function playSource(source: string, volume: number, loop = false) {
+  const audio = createAudioElement(source, volume, loop);
+
+  if (!loop) {
+    trackOneShotAudio(audio);
   }
 
-  const cached = soundCache.get(sound);
-  if (cached) {
-    return cached;
+  try {
+    const result = audio.play();
+    if (result && typeof result.then === "function") {
+      await result;
+    }
+
+    return { ok: true as const, source };
+  } catch (error) {
+    if (!loop) {
+      activeOneShotAudios.delete(audio);
+    }
+
+    audio.pause();
+    audio.currentTime = 0;
+    return { ok: false as const, error: formatAudioError(error), source };
+  }
+}
+
+async function playWithFallback(sound: TvAudioSound, volume: number, loop = false): Promise<TvAudioPlayResult> {
+  const sources = getSourceList(sound);
+  let lastError = "";
+
+  for (const source of sources) {
+    const result = await playSource(source, volume, loop);
+    if (result.ok) {
+      return result;
+    }
+
+    lastError = result.error;
   }
 
-  const audio = createAudioElement(sound);
-  soundCache.set(sound, audio);
-  return audio;
+  return {
+    ok: false,
+    error: lastError || "No se pudo reproducir el audio",
+  };
 }
 
 export function getStoredTvAudioEnabled() {
@@ -90,8 +165,7 @@ export function setStoredTvAudioVolume(volume: number) {
     return;
   }
 
-  const safeVolume = clampVolume(volume);
-  window.localStorage.setItem(tvAudioVolumeStorageKey, String(safeVolume));
+  window.localStorage.setItem(tvAudioVolumeStorageKey, String(clampVolume(volume)));
 }
 
 export function preloadTvAudio() {
@@ -100,82 +174,47 @@ export function preloadTvAudio() {
   }
 
   (Object.keys(soundSources) as TvAudioSound[]).forEach((sound) => {
-    const audio = ensureAudio(sound);
-    if (audio) {
-      audio.load();
-    }
+    const volume = getStoredTvAudioVolume();
+    getSourceList(sound).forEach((source) => {
+      const audio = createAudioElement(source, volume);
+      audio.pause();
+    });
   });
+}
+
+export async function playTestSound(enabled = getStoredTvAudioEnabled()) {
+  if (!enabled) {
+    return { ok: false as const, error: "Audio desactivado" };
+  }
+
+  return playWithFallback("card", getStoredTvAudioVolume(), false);
 }
 
 export async function unlockTvAudio() {
-  if (!hasAudioElement()) {
+  const result = await playTestSound(true);
+  if (result.ok) {
     setStoredTvAudioEnabled(true);
-    return true;
-  }
-
-  try {
-    const AudioContextClass =
-      typeof window !== "undefined"
-        ? (globalThis as BrowserAudioWindow).AudioContext ||
-          (globalThis as BrowserAudioWindow).webkitAudioContext
-        : undefined;
-
-    if (AudioContextClass) {
-      const context = new AudioContextClass();
-
-      if (context.state === "suspended") {
-        await context.resume();
-      }
-
-      const buffer = context.createBuffer(1, 1, 22050);
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(context.destination);
-      source.start(0);
-      source.stop(0.02);
-      window.setTimeout(() => {
-        void context.close();
-      }, 80);
-    }
-
-    const audio = ensureAudio("start");
-    if (audio) {
-      audio.currentTime = 0;
-      audio.volume = 0.001;
-      await audio.play();
-      audio.pause();
-      audio.currentTime = 0;
-    }
-
-    const standby = ensureAudio("standby");
-    if (standby) {
-      standby.currentTime = 0;
-      standby.volume = 0.001;
-      await standby.play();
-      standby.pause();
-      standby.currentTime = 0;
-    }
-
-    (Object.keys(soundSources) as TvAudioSound[]).forEach((sound) => {
-      const nextAudio = ensureAudio(sound);
-      if (nextAudio) {
-        nextAudio.volume = getStoredTvAudioVolume();
-      }
-    });
-
-    setStoredTvAudioEnabled(true);
-    return true;
-  } catch {
+  } else {
     setStoredTvAudioEnabled(false);
-    return false;
   }
+
+  return result;
+}
+
+export async function playTvSound(sound: Exclude<TvAudioSound, "standby">, enabled = getStoredTvAudioEnabled()) {
+  if (!enabled) {
+    return { ok: false as const, error: "Audio desactivado" };
+  }
+
+  return playWithFallback(sound, getStoredTvAudioVolume(), false);
 }
 
 export function stopTvAudio() {
-  soundCache.forEach((audio) => {
+  activeOneShotAudios.forEach((audio) => {
     audio.pause();
     audio.currentTime = 0;
   });
+  activeOneShotAudios.clear();
 
   if (standbyAudio) {
     standbyAudio.pause();
@@ -183,83 +222,38 @@ export function stopTvAudio() {
   }
 }
 
-export function playTvSound(sound: Exclude<TvAudioSound, "standby">, enabled = getStoredTvAudioEnabled()) {
-  if (!enabled) {
-    return false;
-  }
-
-  const audio = ensureAudio(sound);
-
-  if (!audio) {
-    return false;
-  }
-
-  try {
-    audio.pause();
-    audio.currentTime = 0;
-    audio.volume = getStoredTvAudioVolume();
-    const playResult = audio.play();
-    if (playResult && typeof playResult.then === "function") {
-      void playResult.catch(() => undefined);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function playTestSound(enabled = getStoredTvAudioEnabled()) {
-  if (!enabled) {
-    return false;
-  }
-
-  const audio = ensureAudio("card");
-
-  if (!audio) {
-    return false;
-  }
-
-  try {
-    audio.pause();
-    audio.currentTime = 0;
-    audio.volume = getStoredTvAudioVolume();
-    await audio.play();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function startStandbyAudio(enabled = getStoredTvAudioEnabled()) {
+export async function startStandbyAudio(enabled = getStoredTvAudioEnabled()) {
   if (!enabled) {
     stopStandbyAudio();
-    return false;
+    return { ok: false as const, error: "Audio desactivado" };
   }
 
-  const audio = ensureAudio("standby");
+  const volume = getStoredTvAudioVolume() * 0.55;
+  const sources = getSourceList("standby");
+  let lastError = "";
 
-  if (!audio) {
-    return false;
-  }
+  for (const source of sources) {
+    const audio = createAudioElement(source, volume, true);
 
-  try {
-    if (standbyAudio !== audio) {
-      stopStandbyAudio();
-      standbyAudio = audio;
-    }
-
-    standbyAudio.loop = true;
-    standbyAudio.volume = getStoredTvAudioVolume() * 0.55;
-    if (standbyAudio.paused) {
-      const playResult = standbyAudio.play();
-      if (playResult && typeof playResult.then === "function") {
-        void playResult.catch(() => undefined);
+    try {
+      const result = audio.play();
+      if (result && typeof result.then === "function") {
+        await result;
       }
+
+      if (standbyAudio && standbyAudio !== audio) {
+        standbyAudio.pause();
+        standbyAudio.currentTime = 0;
+      }
+
+      standbyAudio = audio;
+      return { ok: true as const, source };
+    } catch (error) {
+      lastError = formatAudioError(error);
     }
-    return true;
-  } catch {
-    return false;
   }
+
+  return { ok: false as const, error: lastError || "No se pudo reproducir audio de espera" };
 }
 
 export function stopStandbyAudio() {
